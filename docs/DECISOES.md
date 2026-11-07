@@ -5,6 +5,28 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-018 · IA só classifica e redige; validador determinístico decide se publica
+- **Jev classifica** nas categorias da **política** (15 + "outros"), não nas 13 tags. A tag oficial sai de `tag_da_categoria`.
+  - Na mesma chamada vêm urgência, irritação, ameaça externa, caso sensível, "falta brinde" e preferência (reembolso ou reenvio). Irritação serve só para prioridade e estilo.
+  - Conversa sem mensagem do cliente vira `sem_interacao` por regra, sem chamar o Jev.
+  - Confiança < 0,7 ou "outros" → revisão humana.
+  - Medido nos 24 tickets do Reclame Aqui: **23/24 iguais** à classificação manual. A diferença (AT116521, onde está × atraso) não muda a ação, porque a política redireciona uma para a outra. 3 tickets foram para revisão por confiança baixa. Custo: US$ 0,0012 no total.
+- **glm-5.3 redige** a partir da decisão: intenção, ações e fatos permitidos.
+  - O texto do cliente vai em `<mensagem_cliente>`, mascarado, com ordem de não seguir instruções.
+  - A saída é JSON `{resposta, justificativa}`. A justificativa vai para a trilha.
+  - Ajuste medido: com `max_tokens=2000` e `reasoning_effort="low"`, 2 de 3 chamadas gastaram tudo raciocinando e não escreveram nada (a falha segura impediu a publicação). Com `"minimal"` e 4000, foram 3 de 3 em cerca de 4,5 s e cerca de 840 tokens cada.
+- **Validador de saída** (determinístico) reprova:
+  - dado pessoal, número de pedido ou rastreio (canal público);
+  - termo de acusação;
+  - cupom ou compensação;
+  - promessa de ferramenta de dinheiro que a decisão não executa nem oferece;
+  - valor em R$ fora da decisão;
+  - transportadora diferente da do pedido.
+  Essa última regra entrou porque o glm escreveu "expedição dos correios" num pedido da Expressa Já.
+  Reprovou → não publica (o `agente.py` manda para uma pessoa).
+- **Falha segura:** erro de rede, 4xx/5xx, 429 esgotado (espera `x-ratelimit-reset`, até 3 tentativas), JSON inválido ou corte por limite de tokens → resultado com `erro`, nunca um chute. Modelos `deepseek-*` são recusados no próprio cliente.
+- **Limite conhecido:** o validador de promessas é por palavra-chave e pode reprovar texto que só *menciona* a palavra (ex.: "não foi possível a troca"). O erro é no sentido seguro, porque leva a revisão humana.
+
 ## D-017 · Decisão por custo esperado: fórmulas e escolhas de negócio
 - **Ordem:**
   1. A política manda.

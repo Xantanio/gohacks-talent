@@ -154,8 +154,8 @@ A implementar junto com `llm.py` / `agente.py`:
 | 3 | `veracidade.py`: sinais com LR calibrado → `p_verdadeira`; grupo por CPF/telefone/e-mail | ✅ (`tests/test_veracidade.py`, D-012 a D-014) |
 | 3b | Modo público do Reclame Aqui nas ferramentas (pedido mascarado, sem rastreio) | ✅ (D-015) |
 | 4 | `decisao.py`: LTV/LTV potencial, custo esperado, teto e freios para novos (+ não repetir reposição, D-016) | ✅ (`tests/test_decisao.py`, D-017) |
-| 5 | `llm.py`: Jev (classificação) + `glm-5.3` (resposta), custo e 429, **validador de saída e falha segura** | ⏳ próximo |
-| 6 | `agente.py`: filtro `canais=["reclame_aqui"]`, priorização da fila, loop por ticket, **dossiê por ticket**, aprovação humana antes de publicar nos casos da seção Guardrails | ⬜ |
+| 5 | `llm.py`: Jev (classificação) + `glm-5.3` (resposta), custo e 429, **validador de saída e falha segura** | ✅ (`tests/test_llm.py`; ao vivo com `RODAR_IA=1`; D-018) |
+| 6 | `agente.py`: filtro `canais=["reclame_aqui"]`, priorização da fila, loop por ticket, **dossiê por ticket**, aprovação humana antes de publicar nos casos da seção Guardrails | ⏳ próximo |
 | 7 | Trilha de decisão completa: trilha em toda ação ✅; justificativa de LLM/Jev, dossiê e `docs/DECISOES.md` sempre atualizado | 🔄 contínuo |
 | 8 | Frente analista: `buscar_conversas`, `consultar_metricas`, `abrir_incidente`, `notificar_clientes` (ainda não simuladas) | ⬜ |
 | 9 | `api.py` para demo (substitui o protótipo `tests/main.py`, que inventa ação de cupom) | ⬜ |
