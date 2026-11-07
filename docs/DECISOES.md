@@ -5,6 +5,21 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-022 · LLM como juiz e registro de cada validação (pedido do usuário)
+- **Contexto:** o validador determinístico pega regras duras (dado pessoal, valor, prazo, transportadora, promessa de dinheiro). Ele não pega *afirmação inventada* em linguagem natural ("já está em produção" quando os fatos dizem "aguardando expedição") nem *compromisso inventado* ("vamos te avisar"). O usuário pediu LLM como juiz e registros da validação.
+- **Decisão:**
+  - **Juiz de outra família:** `gpt-6-astra`, com versão fixa, enquanto o redator é `glm-5.3`. Assim o modelo não avalia o próprio texto. Testado contra `mimo-v2.6-flash`: o gpt respondeu em 4,2 s com JSON limpo, o mimo em 10,8 s.
+  - **Cinco critérios**, nota de 1 a 5 com justificativa cada: fidelidade, veracidade, segurança, empatia, clareza.
+  - **Quem aprova é o código:** fidelidade, veracidade e segurança ≥ 4; empatia e clareza ≥ 3. O juiz não tem voto próprio.
+  - **Ordem:** redator → validador → juiz (só para texto que passou no validador) → se reprovado, reescrita com a crítica de quem reprovou. São até 3 tentativas; depois disso, pessoa.
+  - **Juiz fora do ar** → vale o validador e o texto é publicado, com o erro registrado. Motivo: o juiz é camada extra de qualidade, não de segurança. As regras duras já passaram, e a preferência do usuário é automatizar.
+  - **Registro:** uma linha por tentativa em `validacoes.csv` (texto, parecer do validador, notas, critérios reprovados, justificativas, problemas e sugestão do juiz, resultado). O dossiê mostra o último parecer, e a trilha do `responder_cliente` cita o juiz.
+- **Calibração com execuções reais (Reclame Aqui):**
+  - `juiz-v1` reprovou a 1ª versão de todos os textos; todos passaram só na 3ª. Parte das críticas era válida, como "em produção" inventado. Parte contradizia as nossas regras: penalizava a *falta* de prazo (que o D-021 proíbe) e o pedido *mascarado*.
+  - `juiz-v2` recebeu essas regras no prompt e as críticas ficaram consistentes. O padrão restante era do redator: acrescentar "vamos te avisar" ou "acompanhar".
+  - `resposta-v2` proíbe compromissos fora das AÇÕES e manda usar as palavras dos FATOS. Resultado: todos aprovados na 2ª tentativa, com 23 de 24 automáticos mantidos.
+- **Custo:** a validação em duas camadas elevou o chat de cerca de 4,6 mil para cerca de 19 mil tokens por execução da fila (o proxy não informa preço do chat). O Jev ficou igual, em US$ 0,0012.
+
 ## D-021 · Validador reprova prazo inventado (decisão do usuário)
 - **Contexto:** num rascunho real (AT116521), o glm escreveu "em até 1 dia útil entraremos em contato". Ninguém decidiu esse prazo, e publicado no Reclame Aqui ele vira promessa pública que pode ser quebrada.
 - **Decisão:** `validar_resposta` reprova:

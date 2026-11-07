@@ -58,6 +58,7 @@ class Estado:
     suspeitas: dict[str, dict[str, Any]] = field(default_factory=dict)  # por conversation_id
     cosmetovigilancia: list[dict[str, Any]] = field(default_factory=list)
     canal_do_time: list[dict[str, Any]] = field(default_factory=list)  # mãos levantadas e respostas a colaboradores
+    validacoes: list[dict[str, Any]] = field(default_factory=list)     # cada tentativa de texto: validador + juiz (D-022)
     _seq: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
@@ -125,6 +126,7 @@ class Estado:
             "estornos": _csv(pasta / "estornos.csv", self.estornos),
             "chamados": _csv(pasta / "chamados_transportadora.csv", self.chamados),
             "cosmetovigilancia": _csv(pasta / "cosmetovigilancia.csv", self.cosmetovigilancia),
+            "validacoes": _csv(pasta / "validacoes.csv", self.validacoes),
         }
         caminho_log = pasta / "log_chamadas.jsonl"
         with caminho_log.open("w", encoding="utf-8") as f:

@@ -44,7 +44,7 @@ CUSTO_CANAL = {k.split(".")[0]: float(v) for k, v in POL["custo_por_conversa_rs"
 ACOES_SEM_RISCO = {"informar_status", "solicitar_foto", "abrir_chamado_transportadora", "responder_duvida",
                    "agradecer", "validar_cupom", "responder_cliente"}
 LIMIAR_CATEGORIA_CANDIDATA = 0.15
-TENTATIVAS_REDACAO = 2  # 1ª redação + 1 reescrita com o motivo da reprovação
+TENTATIVAS_REDACAO = 3  # 1ª redação + até 2 reescritas com o motivo da reprovação (validador ou juiz)
 REPOSICAO_POR_CATEGORIA = {"erro_personalizacao": "reimprimir_personalizacao", "avaria_vazamento": "reenviar_produto",
                            "item_faltante": "reenviar_produto"}
 
@@ -164,6 +164,7 @@ class Resultado:
     redacao: llm.Redacao | None = None
     tentativas: list[str] = field(default_factory=list)   # motivos das redações reprovadas antes da final
     confianca_baixa: str | None = None                    # análise do D-020 quando o Jev ficou em dúvida
+    julgamento: llm.Julgamento | None = None              # último parecer do juiz (D-022)
     erro: str | None = None
 
 
@@ -241,7 +242,8 @@ def _motivos_para_reter(t: Ticket, d: Decisao | None, confianca_liberada: bool =
     return m
 
 
-def processar(amb: Ambiente, t: Ticket, redigir: Callable[[list[dict[str, str]]], llm.Redacao] | None) -> Resultado:
+def processar(amb: Ambiente, t: Ticket, redigir: Callable[[list[dict[str, str]]], llm.Redacao] | None,
+              julgar: Callable[[list[dict[str, str]]], llm.Julgamento] | None = None) -> Resultado:
     r = Resultado(t)
     c = t.classificacao
     with amb.atendendo(t.conversation_id):
@@ -294,7 +296,7 @@ def processar(amb: Ambiente, t: Ticket, redigir: Callable[[list[dict[str, str]]]
 
         if mensagem_enviada and not passos_texto_livre:
             return r
-        _responder_com_llm(amb, r, d, redigir, reter, trilha, passos_texto_livre)
+        _responder_com_llm(amb, r, d, redigir, reter, trilha, passos_texto_livre, julgar)
     return r
 
 
@@ -308,7 +310,7 @@ def _acoes_para_prompt(r: Resultado, d: Decisao) -> list[str]:
 
 
 def _responder_com_llm(amb: Ambiente, r: Resultado, d: Decisao, redigir, reter: bool, trilha: dict[str, Any],
-                       passos_texto: list[Passo]) -> None:
+                       passos_texto: list[Passo], julgar=None) -> None:
     t = r.ticket
     publica = t.canal in {"reclame_aqui"}
     pedido = pedido_na_posicao(amb, t.order_id) if t.order_id else None
@@ -331,9 +333,12 @@ def _responder_com_llm(amb: Ambiente, r: Resultado, d: Decisao, redigir, reter: 
         permitidas.add(REPOSICAO_POR_CATEGORIA.get(d.categoria, ""))
     pendentes = {p.ferramenta for p in d.passos if any(_placeholder(v) for v in p.params.values())}
     valores = {d.avaliacao.valor_acao} if d.avaliacao.valor_acao else set()
+    acoes_prompt = _acoes_para_prompt(r, d)
+    jul: llm.Julgamento | None = None
     for tentativa in range(1, TENTATIVAS_REDACAO + 1):
         red = redigir(msgs)
         r.redacao = red
+        # 1) regras duras, determinísticas
         r.validacao = llm.validar_resposta(red.texto, publica=publica, ferramentas_permitidas=permitidas,
                                            ferramentas_pendentes=pendentes,
                                            valores_permitidos=valores,
@@ -341,30 +346,67 @@ def _responder_com_llm(amb: Ambiente, r: Resultado, d: Decisao, redigir, reter: 
                                            transportadora=(pedido or {}).get("transportadora"),
                                            # prazos aceitos: os dos fatos do caso e os da regra da política (D-021)
                                            fatos=fatos + [texto_regra(d.categoria)])
-        if red.erro or r.validacao.ok or tentativa == TENTATIVAS_REDACAO:
+        # 2) qualidade, por um juiz de outra família (só para texto que passou nas regras) (D-022)
+        jul = None
+        if not red.erro and r.validacao.ok and julgar is not None:
+            jul = julgar(llm.montar_prompt_juiz(texto=red.texto, empresa=t.empresa, publica=publica,
+                                                intencao=d.intencao_resposta, acoes=acoes_prompt, fatos=fatos,
+                                                mensagem_cliente=texto_cliente))
+            r.julgamento = jul
+        juiz_ok = jul is None or jul.aprovado or bool(jul.erro)  # juiz fora do ar: vale o validador (D-022)
+        aprovado = not red.erro and r.validacao.ok and juiz_ok
+        ultima = bool(red.erro) or aprovado or tentativa == TENTATIVAS_REDACAO
+        _registrar_validacao(amb, r, tentativa, red, jul, "aprovado" if aprovado
+                             else "reprovado_final" if ultima else "reescrever")
+        if ultima:
             break
-        # Autocorreção (D-020): o modelo reescreve sabendo exatamente o que foi reprovado.
-        r.tentativas.append("; ".join(r.validacao.motivos))
+        # 3) autocorreção (D-020): o redator reescreve sabendo exatamente o que foi reprovado e por quem
+        motivo = ("revisão automática: " + "; ".join(r.validacao.motivos)) if not r.validacao.ok \
+            else f"revisor de qualidade: {jul.feedback()}"
+        r.tentativas.append(motivo)
         msgs = msgs + [{"role": "assistant", "content": red.texto or ""},
-                       {"role": "user", "content": "Seu texto foi reprovado pela revisão automática por: "
-                        + "; ".join(r.validacao.motivos) + ". Reescreva corrigindo isso e mantendo as demais regras. "
-                        "Responda só com o JSON."}]
+                       {"role": "user", "content": f"Seu texto foi reprovado pela {motivo}. Reescreva corrigindo isso "
+                                                   "e mantendo as demais regras. Responda só com o JSON."}]
     if red.erro:
         r.motivos_retencao.append(f"redação falhou ({red.erro})")
     elif not r.validacao.ok:
         r.motivos_retencao.append("validador reprovou: " + "; ".join(r.validacao.motivos))
+    elif jul and not jul.aprovado and not jul.erro:
+        r.motivos_retencao.append(f"juiz reprovou ({jul.resumo()}): {jul.feedback()}")
     r.resposta = red.texto
     if r.motivos_retencao:
         r.resposta_origem = "rascunho"
         _levantar_mao(amb, r, red.texto)
         return
+    origem = f"llm {red.modelo} ({red.versao_prompt}) + validador"
+    if jul:
+        origem += f" + juiz {jul.modelo} ({jul.versao_prompt})"
+    evid = list(trilha["evidencias"]) + ([f"juiz: {jul.resumo()}"] if jul else [])
     res = amb.responder_cliente(conversation_id=t.conversation_id, texto=red.texto,
                                 trilha={**trilha, "por_que": f"{trilha['por_que']} | texto: {red.justificativa}",
-                                        "origem": f"llm {red.modelo} ({red.versao_prompt}) + validador"})
+                                        "evidencias": evid, "origem": origem})
     r.executados.append({"ferramenta": "responder_cliente", "params": {}, "ok": res.get("ok"), "erro": res.get("erro"),
                          "acao_id": res.get("acao_id"), "texto": res.get("texto")})
     r.publicada, r.resposta_origem = bool(res.get("ok")), "llm"
     r.resposta = res.get("texto") or red.texto
+
+
+def _registrar_validacao(amb: Ambiente, r: Resultado, tentativa: int, red: llm.Redacao, jul: llm.Julgamento | None,
+                         resultado: str) -> None:
+    """Uma linha por tentativa de texto: o que o redator escreveu, o que o validador e o juiz acharam e por quê."""
+    t, v = r.ticket, r.validacao
+    amb.estado.validacoes.append({
+        "conversation_id": t.conversation_id, "tique": amb.tique, "data_hora": amb.estado.agora_txt(),
+        "tentativa": tentativa, "resultado": resultado, "publica": t.canal == "reclame_aqui",
+        "redator_modelo": red.modelo, "redator_prompt": red.versao_prompt, "redator_justificativa": red.justificativa,
+        "redator_erro": red.erro, "texto": red.texto,
+        "validador_ok": v.ok if v else None, "validador_motivos": v.motivos if v else None,
+        "juiz_modelo": jul.modelo if jul else None, "juiz_prompt": jul.versao_prompt if jul else None,
+        "juiz_aprovado": jul.aprovado if jul else None, "juiz_notas": jul.notas if jul else None,
+        "juiz_reprovados": jul.reprovados if jul else None, "juiz_justificativas": jul.justificativas if jul else None,
+        "juiz_problemas": jul.problemas if jul else None, "juiz_sugestao": jul.sugestao if jul else None,
+        "juiz_erro": jul.erro if jul else None,
+    })
 
 
 def _levantar_mao(amb: Ambiente, r: Resultado, rascunho: str | None) -> None:
@@ -453,6 +495,13 @@ def dossie(r: Resultado, amb: Ambiente) -> str:
         L.append(f"- origem: {r.resposta_origem} · {'publicada' if r.publicada else 'NÃO publicada (rascunho)'}")
         for i, motivo in enumerate(r.tentativas, 1):
             L.append(f"- tentativa {i} reprovada e reescrita automaticamente: {motivo}")
+        if r.julgamento:
+            j = r.julgamento
+            L.append(f"- juiz {j.modelo} ({j.versao_prompt}): {j.resumo()}")
+            for crit, just in j.justificativas.items():
+                L.append(f"  - {crit} {j.notas.get(crit)}: {just}")
+            for prob in j.problemas:
+                L.append(f"  - problema apontado: {prob}")
         if r.validacao:
             L.append(f"- validador: {'aprovado' if r.validacao.ok else 'reprovado: ' + '; '.join(r.validacao.motivos)}")
         if r.redacao and r.redacao.justificativa:
@@ -469,13 +518,15 @@ def dossie(r: Resultado, amb: Ambiente) -> str:
 
 def rodar(canais: list[str] | None = None, limite: int | None = None, usar_ia: bool = True,
           pasta_saida: str | Path = "saida", amb: Ambiente | None = None,
-          classificar: Callable | None = None, redigir: Callable | None = None) -> tuple[list[Resultado], Path]:
+          classificar: Callable | None = None, redigir: Callable | None = None,
+          julgar: Callable | None = None) -> tuple[list[Resultado], Path]:
     """Processa a fila dos `canais` (padrão: só Reclame Aqui, escopo do MVP). Retorna resultados e a pasta de saída."""
     canais = canais or ["reclame_aqui"]
     amb = amb or Ambiente()
     if usar_ia:
         classificar = classificar or llm.classificar
         redigir = redigir or llm.redigir
+        julgar = julgar or llm.julgar
     tickets = carregar_tickets(amb, canais)
     for t in tickets:
         conv = amb.ler_conversa(t.conversation_id)
@@ -485,7 +536,7 @@ def rodar(canais: list[str] | None = None, limite: int | None = None, usar_ia: b
     resultados = []
     for t in tickets:
         try:
-            resultados.append(processar(amb, t, redigir))
+            resultados.append(processar(amb, t, redigir, julgar))
         except Exception as e:  # falha segura: um ticket com erro não derruba a fila nem gera ação de dinheiro
             res = Resultado(t, erro=f"{type(e).__name__}: {e}"[:300], motivos_retencao=["erro interno"])
             with amb.atendendo(t.conversation_id):

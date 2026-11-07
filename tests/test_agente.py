@@ -36,6 +36,11 @@ def classificador_falso(conversa, pedido=None):
                              origem="teste", modelo="falso")
 
 
+def juiz_falso(mensagens):
+    return llm.Julgamento(True, {"fidelidade": 5, "veracidade": 5, "seguranca": 5, "empatia": 4, "clareza": 4},
+                          {"fidelidade": "ok"}, modelo="juiz-falso")
+
+
 def redator_falso(mensagens):
     return llm.Redacao(texto="Olá! Sentimos muito pelo transtorno. Já estamos cuidando do seu caso e retornamos em breve.",
                        justificativa="texto de teste", modelo="falso")
@@ -45,7 +50,7 @@ def redator_falso(mensagens):
 def execucao(tmp_path_factory):
     amb = Ambiente()
     resultados, pasta = A.rodar(["reclame_aqui"], usar_ia=True, pasta_saida=tmp_path_factory.mktemp("saida"), amb=amb,
-                                classificar=classificador_falso, redigir=redator_falso)
+                                classificar=classificador_falso, redigir=redator_falso, julgar=juiz_falso)
     return amb, {r.ticket.conversation_id: r for r in resultados}, pasta
 
 
@@ -112,12 +117,12 @@ def test_dossie_e_exportacao(execucao):
 
 # ---- D-020: automação quando errar é barato --------------------------------------
 
-def processar_um(cid, classificacao, redigir=redator_falso):
-    amb = Ambiente()
+def processar_um(cid, classificacao, redigir=redator_falso, julgar=None, amb=None):
+    amb = amb or Ambiente()
     t = next(t for t in A.carregar_tickets(amb, ["reclame_aqui"]) if t.conversation_id == cid)
     t.classificacao = classificacao
     A.priorizar(amb, [t])
-    return A.processar(amb, t, redigir)
+    return A.processar(amb, t, redigir, julgar)
 
 
 def duvida(cats: dict[str, float]) -> llm.Classificacao:
@@ -177,5 +182,54 @@ def test_falha_da_ia_nao_publica(tmp_path):
     def falha(conversa, pedido=None):
         return llm.Classificacao(None, revisao_humana=True, erro="HTTP 503")
     resultados, _ = A.rodar(["reclame_aqui"], limite=2, pasta_saida=tmp_path, classificar=falha,
-                            redigir=redator_falso)
+                            redigir=redator_falso, julgar=juiz_falso)
     assert all(not r.publicada and "503" in (r.erro or "") for r in resultados)
+
+
+# ---- D-022: juiz ------------------------------------------------------------------
+
+PERSONALIZACAO_OK = llm.Classificacao("erro_personalizacao", 0.95, {"erro_personalizacao": 0.95}, origem="teste")
+
+
+def test_juiz_reprova_e_texto_e_reescrito_com_a_critica():
+    notas_ruins = {"fidelidade": 5, "veracidade": 2, "seguranca": 5, "empatia": 4, "clareza": 4}
+    pareceres = iter([llm.Julgamento(False, notas_ruins, {"veracidade": "diz que já está pronta"},
+                                     ["'já está pronta' não consta nos fatos"], "dizer 'aguardando expedição'",
+                                     ["veracidade"], modelo="juiz-falso"),
+                      juiz_falso(None)])
+    vistos = []
+
+    def redator(msgs):
+        vistos.append(msgs[-1]["content"])
+        return llm.Redacao(texto="Sentimos muito! A reposição do seu pedido está aguardando expedição.",
+                           justificativa="t", modelo="falso")
+
+    amb = Ambiente()
+    r = processar_um("AT116524", PERSONALIZACAO_OK, redigir=redator, julgar=lambda m: next(pareceres), amb=amb)
+    assert r.publicada and len(r.tentativas) == 1 and "revisor de qualidade" in r.tentativas[0]
+    assert "já está pronta" in vistos[-1]                      # a crítica do juiz chegou ao redator
+    linhas = [v for v in amb.estado.validacoes if v["conversation_id"] == "AT116524"]
+    assert [v["resultado"] for v in linhas] == ["reescrever", "aprovado"]
+    assert linhas[0]["juiz_reprovados"] == ["veracidade"] and linhas[0]["juiz_justificativas"]
+    acao = [a for a in amb.estado.acoes if a["acao"] == "responder_cliente"][-1]
+    assert "juiz" in acao["trilha"]["origem"] and any(e.startswith("juiz:") for e in acao["trilha"]["evidencias"])
+
+
+def test_juiz_reprova_tres_vezes_vai_para_pessoa():
+    ruim = llm.Julgamento(False, {"fidelidade": 2, "veracidade": 5, "seguranca": 5, "empatia": 4, "clareza": 4},
+                          {"fidelidade": "sugere troca"}, reprovados=["fidelidade"], modelo="juiz-falso")
+    r = processar_um("AT116524", PERSONALIZACAO_OK, julgar=lambda m: ruim)
+    assert not r.publicada and any("juiz reprovou" in m for m in r.motivos_retencao)
+    assert len(r.tentativas) == A.TENTATIVAS_REDACAO - 1
+
+
+def test_juiz_fora_do_ar_vale_o_validador():
+    r = processar_um("AT116524", PERSONALIZACAO_OK, julgar=lambda m: llm.Julgamento(False, erro="HTTP 503"))
+    assert r.publicada  # texto já aprovado pelas regras determinísticas
+
+
+def test_validacoes_exportadas(execucao):
+    amb, _, pasta = execucao
+    assert amb.estado.validacoes and (pasta / "validacoes.csv").exists()
+    d = (pasta / "dossies" / "AT116524.md").read_text(encoding="utf-8")
+    assert "juiz juiz-falso" in d
