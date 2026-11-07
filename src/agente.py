@@ -31,7 +31,7 @@ import pandas as pd
 from . import dados, llm
 from .decisao import Decisao, decidir, valor_do_cliente
 from .ferramentas import CATALOGO, Ambiente, mascarar_pii, mascarar_publico, pedido_na_posicao
-from .politicas import CAMPANHA, POL, Passo, avaliar, coletar_fatos
+from .politicas import CAMPANHA, POL, Passo, avaliar, coletar_fatos, texto_regra
 from .veracidade import avaliar_veracidade
 
 FERRAMENTAS_DE_MENSAGEM = {"solicitar_foto", "informar_status", "negar_por_politica", "orientar_suspensao_uso",
@@ -338,7 +338,9 @@ def _responder_com_llm(amb: Ambiente, r: Resultado, d: Decisao, redigir, reter: 
                                            ferramentas_pendentes=pendentes,
                                            valores_permitidos=valores,
                                            permite_cupom=d.categoria == "cupom_promocao",
-                                           transportadora=(pedido or {}).get("transportadora"))
+                                           transportadora=(pedido or {}).get("transportadora"),
+                                           # prazos aceitos: os dos fatos do caso e os da regra da política (D-021)
+                                           fatos=fatos + [texto_regra(d.categoria)])
         if red.erro or r.validacao.ok or tentativa == TENTATIVAS_REDACAO:
             break
         # Autocorreção (D-020): o modelo reescreve sabendo exatamente o que foi reprovado.

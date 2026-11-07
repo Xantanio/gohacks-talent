@@ -263,7 +263,8 @@ REGRAS_REDACAO = """Você redige a resposta do atendimento da {empresa} ao clien
 A decisão JÁ FOI TOMADA pelo sistema; você só escreve o texto. Regras obrigatórias:
 1. Comunique exatamente a INTENÇÃO e as AÇÕES informadas. Não prometa nada além delas (nenhum reenvio, reembolso,
    estorno, troca, cupom, desconto, brinde extra ou compensação que não esteja em AÇÕES). Não invente prazos, valores,
-   transportadora, etapas de entrega ou envio de código de rastreio: cite só o que estiver em FATOS.
+   transportadora, etapas de entrega ou envio de código de rastreio: cite só o que estiver em FATOS. Nunca prometa
+   prazo de retorno ("em até 1 dia útil", "amanhã", "até sexta"): use "assim que tivermos novidades".
 2. Nunca acuse o cliente nem fale em fraude, golpe, suspeita ou mentira.
 3. Não escreva CPF, cartão, telefone, e-mail, endereço nem nome completo.{regra_publica}
 4. Tom caloroso e humano da marca, sem jargão interno (sem nomes de sistema, ferramenta, política ou código).
@@ -351,6 +352,41 @@ CONCLUIDO = re.compile(
     rf"|{_ACAO}\s+(\w+\s+){{0,3}}?(j[aá]\s+)?(foi|foram|est[aá])\s+"                     # "o reembolso já foi feito"
     r"(aprovad|processad|feit|realizad|efetuad|conclu[ií]d|creditad|liberad)\w*)\b", re.I)
 _RE_VALOR = re.compile(r"R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:[.,]\d{2})?)")
+# Prazos: todo "número + unidade de tempo", data dd/mm ou "amanhã/até sexta" no texto precisa estar nos FATOS (D-021).
+_NUMEROS = {"um": 1, "uma": 1, "dois": 2, "duas": 2, "três": 3, "tres": 3, "quatro": 4, "cinco": 5, "seis": 6,
+            "sete": 7, "oito": 8, "nove": 9, "dez": 10, "quinze": 15, "trinta": 30}
+_RE_PRAZO_REL = re.compile(r"\b(\d{1,3}|" + "|".join(_NUMEROS) + r")\s*(dias?\s+[úu]t(?:eis|il)|dias?\s+corridos?|dias?"
+                           r"|horas?|h\b|semanas?|minutos?|min\b|faturas?|meses|m[êe]s)", re.I)
+_RE_DATA = re.compile(r"\b(\d{1,2})/(\d{1,2})(?:/\d{2,4})?\b")
+_RE_DATA_ISO = re.compile(r"\b\d{4}-(\d{2})-(\d{2})\b")
+_RE_DIA_VAGO = re.compile(r"\b(amanh[ãa]|at[ée] (a |o )?(segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo)"
+                          r"|(nesta|na pr[óo]xima|essa|esta) semana|ainda hoje)\b", re.I)
+
+
+def _unidade(u: str) -> str:
+    u = u.lower()
+    if re.search(r"[úu]t(eis|il)", u):
+        return "dia_util"
+    for chave, nome in (("dia", "dia"), ("hora", "hora"), ("h", "hora"), ("semana", "semana"), ("min", "minuto"),
+                        ("fatura", "fatura"), ("m", "mes")):
+        if u.startswith(chave):
+            return nome
+    return u
+
+
+def prazos_no_texto(texto: str) -> set[str]:
+    """Prazos normalizados: '1 dia_util', '48 hora', 'data 04/11'."""
+    achados = set()
+    for n, u in _RE_PRAZO_REL.findall(texto or ""):
+        num = int(n) if n.isdigit() else _NUMEROS[n.lower()]
+        achados.add(f"{num} {_unidade(u)}")
+    for d, mes in _RE_DATA.findall(texto or ""):
+        achados.add(f"data {int(d):02d}/{int(mes):02d}")
+    for mes, d in _RE_DATA_ISO.findall(texto or ""):
+        achados.add(f"data {int(d):02d}/{int(mes):02d}")
+    return achados
+
+
 # Transportadoras dos dados + "Correios" (o modelo tende a inventar; nenhum pedido usa Correios).
 TRANSPORTADORAS = ("Expressa Já", "TransNorte", "Rápido Sul", "ViaLog", "Correio Ágil", "Correios")
 _RE_TRANSPORTADORA = re.compile(r"\b(" + "|".join(re.escape(t) for t in TRANSPORTADORAS) + r")\b", re.I)
@@ -372,7 +408,7 @@ def _valor_br(s: str) -> float:
 def validar_resposta(texto: str | None, *, publica: bool, ferramentas_permitidas: set[str],
                      valores_permitidos: set[float] = frozenset(), permite_cupom: bool = False,
                      transportadora: str | None = None, ferramentas_pendentes: set[str] = frozenset(),
-                     max_caracteres: int = 1200) -> Validacao:
+                     fatos: list[str] | None = None, max_caracteres: int = 1200) -> Validacao:
     """Reprova texto que vaze dado, acuse, prometa o que o código não fez ou invente valor (Guardrails item 3).
 
     `ferramentas_permitidas`: ferramentas de dinheiro que a decisão executa ou oferece (alternativas).
@@ -400,6 +436,13 @@ def validar_resposta(texto: str | None, *, publica: bool, ferramentas_permitidas
     for v in _RE_VALOR.findall(texto):
         if not any(abs(_valor_br(v) - p) < 0.01 for p in valores_permitidos):
             m.append(f"cita valor R$ {v} que não está na decisão")
+    permitidos = prazos_no_texto(" ".join(fatos or []))
+    inventados = sorted(prazos_no_texto(texto) - permitidos)
+    if inventados:
+        m.append(f"cita prazo que não está nos fatos: {', '.join(inventados)}")
+    vago = _RE_DIA_VAGO.search(texto)
+    if vago:
+        m.append(f"promete prazo vago que ninguém decidiu: '{vago.group(0)}'")
     for t in {x.group(0) for x in _RE_TRANSPORTADORA.finditer(texto)}:
         if not transportadora or t.lower() != transportadora.lower():
             m.append(f"cita transportadora '{t}' que não é a do pedido ({transportadora or 'nenhuma'})")

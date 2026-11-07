@@ -60,6 +60,32 @@ def test_validador_pega_transportadora_inventada():
                                 transportadora="Expressa Já").ok
 
 
+def test_validador_reprova_prazo_inventado():
+    # caso real (AT116521, rascunho retido): o glm prometeu um prazo que ninguém decidiu
+    texto = "Nossa equipe registrou o caso. Em até 1 dia útil entraremos em contato. A previsão é até 04/11."
+    fatos = ["pedido GCH***560: status em_transito, prometido 2026-11-04"]
+    v = llm.validar_resposta(texto, publica=True, ferramentas_permitidas=set(), fatos=fatos)
+    assert not v.ok and any("1 dia_util" in m for m in v.motivos)
+    assert not any("04/11" in m for m in v.motivos)  # a data veio dos fatos (2026-11-04)
+
+
+@pytest.mark.parametrize("texto", ["Retornamos amanhã com novidades.", "Até sexta resolvemos.",
+                                   "Em 48h você recebe uma resposta.", "O estorno sai em dois dias úteis."])
+def test_validador_reprova_prazos_vagos_e_por_extenso(texto):
+    assert not llm.validar_resposta(texto, publica=True, ferramentas_permitidas={"reembolsar"}, fatos=[]).ok
+
+
+def test_validador_aceita_prazo_da_politica_e_dos_fatos():
+    texto = "Você está dentro do prazo de 7 dias para devolução. O pedido foi entregue em 26/10."
+    fatos = ["recebido em 2026-10-26", "Antes da separação: cancelar. Depois do recebimento: reembolso integral em até 7 dias"]
+    assert llm.validar_resposta(texto, publica=True, ferramentas_permitidas=set(), fatos=fatos).ok
+
+
+def test_prazos_no_texto_normaliza():
+    assert llm.prazos_no_texto("em até 1 dia útil, 48h, 2 semanas, 30/10 e 2026-11-04") == {
+        "1 dia_util", "48 hora", "2 semana", "data 30/10", "data 04/11"}
+
+
 def test_validador_acao_pendente_pode_ser_citada_mas_nao_como_feita():
     pend = {"reembolsar"}
     ok = "Encaminhamos para aprovação do reembolso; assim que aprovado, ele será processado."  # caso real AT116520

@@ -5,6 +5,16 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-021 · Validador reprova prazo inventado (decisão do usuário)
+- **Contexto:** num rascunho real (AT116521), o glm escreveu "em até 1 dia útil entraremos em contato". Ninguém decidiu esse prazo, e publicado no Reclame Aqui ele vira promessa pública que pode ser quebrada.
+- **Decisão:** `validar_resposta` reprova:
+  - número + unidade de tempo ("1 dia útil", "48h", "dois dias úteis", "2 semanas") e datas dd/mm que **não aparecem nos fatos do caso nem no texto da regra da política**. As datas ISO dos fatos (2026-11-04) são convertidas para 04/11 antes de comparar;
+  - promessa vaga de dia ("amanhã", "até sexta", "ainda hoje", "nesta semana") sempre.
+  - O prompt também passou a proibir prazo de retorno: o modelo deve usar "assim que tivermos novidades".
+- **Aceito:** "dentro do prazo de 7 dias para devolução" (da regra da política) e "previsão até 04/11" (do rastreio).
+- **Consequência:** sem aumento de trabalho humano. A reprovação volta ao glm com o motivo e ele reescreve (D-020). Na execução real seguinte, nenhum texto precisou ser reescrito por prazo e o resultado ficou em 23 de 24 automáticos.
+- **Limite:** número por extenso só é reconhecido até "dez", "quinze" e "trinta". "Um dia" em sentido figurado ("um dia especial") seria reprovado, mas o erro é no lado seguro.
+
 ## D-020 · Automação total quando errar é barato (decisão do usuário)
 - **Contexto:** na execução real, 4 dos 5 tickets retidos eram dúvida do Jev entre "atraso" e "onde está o pedido". Nas duas categorias a ação é a mesma (informar status). Reter só gerava fila humana. O usuário pediu: "quando o custo de errar não é tão alto, seguir com a automação total; o que for possível automatizar, automatizar".
 - **Decisão 1 (confiança baixa):** com confiança < 0,7, o agente roda política e decisão para cada categoria provável (probabilidade ≥ 15%, até 3). São só leituras; nada é executado nesse teste.
