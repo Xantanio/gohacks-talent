@@ -5,6 +5,12 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-023 · Documento de prompts gerado a partir do código; Jev sem número de pedido
+- **Contexto:** o usuário pediu um arquivo com os prompts de todos os agentes, para validação.
+- **Decisão:** `docs/PROMPTS.md` é **gerado** por `python -m src.documentar_prompts` a partir das constantes de `src/llm.py` e `src/agente.py`. Ele traz visão geral (modelo, versão, parâmetros), prompts completos, exemplo real renderizado (AT116524, sem chamar o proxy), regras do validador, onde ficam os registros e uma lista de verificação. `tests/test_prompts_doc.py` falha se o arquivo divergir do código. A mensagem de reescrita virou a constante `MENSAGEM_REESCRITA`.
+- **Descartado:** escrever o documento à mão. Ele ficaria desatualizado na primeira mudança de prompt, e quem valida estaria validando outra coisa.
+- **Achado ao gerar:** o estado enviado ao Jev levava o número completo do pedido. Ele não ajuda a classificar, então agora o Jev recebe o texto com `mascarar_publico` (minimização de dados). Conferido ao vivo: 23/24 continuam iguais à classificação manual.
+
 ## D-022 · LLM como juiz e registro de cada validação (pedido do usuário)
 - **Contexto:** o validador determinístico pega regras duras (dado pessoal, valor, prazo, transportadora, promessa de dinheiro). Ele não pega *afirmação inventada* em linguagem natural ("já está em produção" quando os fatos dizem "aguardando expedição") nem *compromisso inventado* ("vamos te avisar"). O usuário pediu LLM como juiz e registros da validação.
 - **Decisão:**

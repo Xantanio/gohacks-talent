@@ -125,6 +125,7 @@ Objetivo: quem audita ou assume o projeto entende **o que foi decidido e por qu�
 - Chamadas a LLM/Jev registram modelo, versão do prompt, `confidence` e uma `justificativa` curta **pedida explicitamente na saída**, além do custo.
 - **Validação do texto em duas camadas** (D-022): validador determinístico (regras duras) → **LLM como juiz** de outra família (`gpt-6-astra`) com nota 1–5 e **justificativa por critério** (fidelidade, veracidade, segurança, empatia, clareza). Quem aprova é o código (mínimos por critério). Toda tentativa — texto, parecer do validador, notas e justificativas do juiz, resultado — vai para `validacoes.csv` e para o dossiê.
 - Por ticket, o `agente.py` gera um **dossiê legível** (Markdown) com etapas: o que leu → como classificou → o que investigou → regra aplicada → alternativas com custo esperado → ação escolhida → texto enviado.
+- **Prompts de todos os agentes** (Jev, redator, juiz, reescrita) + regras do validador: `docs/PROMPTS.md`, **gerado** por `python -m src.documentar_prompts`. Mudou um prompt → suba a `VERSAO_PROMPT_*`, gere o arquivo (o teste falha se esquecer) e registre em `docs/DECISOES.md`.
 - **Decisões de projeto** (de desenvolvimento, não de ticket) vão em `docs/DECISOES.md`, uma entrada por decisão: contexto, decisão, alternativas descartadas, consequência.
 - Exportação: `Estado.exportar("saida/")` gera `acoes_executadas.csv` (com a coluna `trilha`), `log_chamadas.jsonl`, `canal_do_time.md` e as tabelas de OMS, estornos, chamados, aprovações, suspeitas e cosmetovigilância.
 

@@ -44,6 +44,8 @@ CUSTO_CANAL = {k.split(".")[0]: float(v) for k, v in POL["custo_por_conversa_rs"
 ACOES_SEM_RISCO = {"informar_status", "solicitar_foto", "abrir_chamado_transportadora", "responder_duvida",
                    "agradecer", "validar_cupom", "responder_cliente"}
 LIMIAR_CATEGORIA_CANDIDATA = 0.15
+MENSAGEM_REESCRITA = ("Seu texto foi reprovado pela {motivo}. Reescreva corrigindo isso e mantendo as demais regras. "
+                      "Responda só com o JSON.")
 TENTATIVAS_REDACAO = 3  # 1ª redação + até 2 reescritas com o motivo da reprovação (validador ou juiz)
 REPOSICAO_POR_CATEGORIA = {"erro_personalizacao": "reimprimir_personalizacao", "avaria_vazamento": "reenviar_produto",
                            "item_faltante": "reenviar_produto"}
@@ -365,8 +367,7 @@ def _responder_com_llm(amb: Ambiente, r: Resultado, d: Decisao, redigir, reter: 
             else f"revisor de qualidade: {jul.feedback()}"
         r.tentativas.append(motivo)
         msgs = msgs + [{"role": "assistant", "content": red.texto or ""},
-                       {"role": "user", "content": f"Seu texto foi reprovado pela {motivo}. Reescreva corrigindo isso "
-                                                   "e mantendo as demais regras. Responda só com o JSON."}]
+                       {"role": "user", "content": MENSAGEM_REESCRITA.format(motivo=motivo)}]
     if red.erro:
         r.motivos_retencao.append(f"redação falhou ({red.erro})")
     elif not r.validacao.ok:
