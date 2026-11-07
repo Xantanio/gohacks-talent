@@ -41,8 +41,8 @@ def test_reembolso_acima_da_alcada_exige_aprovacao_de_outra_pessoa():
     with atend.atendendo(DUPLICADA):
         r = atend.reembolsar(order_id=PED_DUP, valor=118.80, motivo="cobranca_duplicada", trilha=T("duplicidade"))
         assert not r["ok"] and "alçada" in r["erro"]
-        # dentro da alçada não se pede aprovação
-        assert not atend.solicitar_aprovacao(acao="reembolsar", order_id=PED_DUP, valor=90,
+        # ação sem aprovação possível não pode ser pedida
+        assert not atend.solicitar_aprovacao(acao="cancelar_pedido", order_id=PED_DUP, valor=90,
                                              justificativa="x", trilha=T("x"))["ok"]
         apr = atend.solicitar_aprovacao(acao="reembolsar", order_id=PED_DUP, valor=118.80,
                                         justificativa="2 cobranças efetivas, R$ 118,80 a mais",

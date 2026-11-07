@@ -62,8 +62,23 @@ def test_brinde_faltante_sem_foto_pede_foto(amb):
     assert any("campanha" in f for f in a.fatos)
 
 
-def test_personalizacao_com_foto_e_prazo_contado_do_primeiro_contato(amb):
+def test_reposicao_ja_aberta_nao_repete_o_gasto(amb):
+    # AT116524: a nova produção OMS000651 já foi aberta em 30/10 pela conversa anterior AT116157
     a = avaliar(amb, "AT116524", "erro_personalizacao")
+    assert a.situacao == "em_andamento" and ferramentas(a) == ["responder_cliente"]
+    assert any("OMS000651" in f for f in a.fatos) and not a.envolve_dinheiro
+
+
+def test_reposicao_entregue_e_nova_reclamacao_escala(amb):
+    f = P.coletar_fatos(amb, "AT116524")
+    f = replace(f, trocas_pedido=[{**f.trocas_pedido[0], "status": "entregue"}])
+    a = P.avaliar("erro_personalizacao", f)
+    assert a.situacao == "escalar" and ferramentas(a) == ["acionar_pessoa"]
+
+
+def test_personalizacao_com_foto_e_prazo_contado_do_primeiro_contato(amb):
+    f = replace(P.coletar_fatos(amb, "AT116524"), trocas_pedido=[])  # mesmo caso, sem a reposição já aberta
+    a = P.avaliar("erro_personalizacao", f)
     assert a.situacao == "elegivel" and ferramentas(a) == ["reimprimir_personalizacao"]
     assert a.passos[0].params["personalizacao_correta"] == "C.T."
     assert a.prazo["primeiro_relato"].startswith("2026-10-29")  # conversa anterior AT116157, não a de 31/10
@@ -111,8 +126,18 @@ def test_troca_de_fragrancia(amb):
     assert ok.situacao == "elegivel" and ferramentas(ok) == ["trocar_produto"]
 
 
+def test_avaria_com_reenvio_em_transito_so_informa(amb):
+    a = avaliar(amb, "AT116700", "avaria_vazamento")  # OMS000587 em trânsito desde 26/10
+    assert a.situacao == "em_andamento" and any("OMS000587" in f for f in a.fatos)
+
+
+def avaria_sem_reposicao(amb) -> P.Fatos:
+    """AT116700 sem a reposição já aberta: base para os casos-limite de avaria."""
+    return replace(P.coletar_fatos(amb, "AT116700"), trocas_pedido=[])
+
+
 def test_avaria_com_foto_de_conversa_anterior(amb):
-    a = avaliar(amb, "AT116700", "avaria_vazamento")
+    a = P.avaliar("avaria_vazamento", avaria_sem_reposicao(amb))
     assert a.situacao == "elegivel" and ferramentas(a) == ["reenviar_produto"]
     assert any("IMG000321" in f for f in a.fatos)
 
@@ -121,13 +146,14 @@ def test_sem_interacao_encerra(amb):
     assert ferramentas(avaliar(amb, "AT116664", "sem_interacao")) == ["encerrar_conversa"]
 
 
-def test_trilha_pronta_para_as_ferramentas(amb):
-    a = avaliar(amb, "AT116524", "erro_personalizacao")
+def test_trilha_pronta_para_as_ferramentas():
+    amb = Ambiente()  # isolado: este teste executa um reenvio de verdade no estado
+    a = P.avaliar("avaria_vazamento", avaria_sem_reposicao(amb))
     t = a.trilha(p_verdadeira=0.9)
-    assert t["por_que"] and t["regra"] == "categorias.erro_personalizacao" and t["origem"] == "regra"
+    assert t["por_que"] and t["regra"] == "categorias.avaria_vazamento" and t["origem"] == "regra"
     assert t["evidencias"] == a.fatos and t["p_verdadeira"] == 0.9
     # e a ferramenta aceita a trilha e executa o passo sugerido
-    with amb.atendendo("AT116524"):
+    with amb.atendendo("AT116700"):
         r = amb.chamar(a.passos[0].ferramenta, trilha=t, **a.passos[0].params)
     assert r["ok"], r
 
@@ -135,27 +161,27 @@ def test_trilha_pronta_para_as_ferramentas(amb):
 # ---- casos-limite sintéticos (a partir de fatos reais) ----------------------
 
 def test_avaria_em_pedido_nao_entregue_nao_se_aplica(amb):
-    f = P.coletar_fatos(amb, "AT116700")
+    f = avaria_sem_reposicao(amb)
     f = replace(f, pedido={**f.pedido, "status_entrega": "em_transito", "data_entrega": None})
     a = P.avaliar("avaria_vazamento", f)
     assert a.situacao == "nao_elegivel" and "não entregue" in a.resumo
 
 
 def test_avaria_fora_do_prazo_nega(amb):
-    f = P.coletar_fatos(amb, "AT116700")
+    f = avaria_sem_reposicao(amb)
     f = replace(f, primeiro_relato=datetime(2026, 10, 30, 10, 0))  # 10 dias após a entrega
     a = P.avaliar("avaria_vazamento", f)
     assert a.situacao == "nao_elegivel" and ferramentas(a) == ["negar_por_politica"]
 
 
 def test_foto_anterior_a_entrega_nao_conta(amb):
-    f = P.coletar_fatos(amb, "AT116700")
+    f = avaria_sem_reposicao(amb)
     f = replace(f, anexos=[{**f.anexos[0], "enviado_em": "2026-10-01 10:00:00"}])
     assert P.avaliar("avaria_vazamento", f).situacao == "falta_informacao"
 
 
 def test_avaria_cara_pede_aprovacao(amb):
-    f = P.coletar_fatos(amb, "AT116700")
+    f = avaria_sem_reposicao(amb)
     f = replace(f, pedido={**f.pedido, "valor_produtos": 350.0, "valor": 362.9})
     a = P.avaliar("avaria_vazamento", f)
     assert a.acima_da_alcada and ferramentas(a) == ["solicitar_aprovacao", "reenviar_produto"]

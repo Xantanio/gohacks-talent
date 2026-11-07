@@ -5,6 +5,14 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-016 · Nunca pagar duas vezes pelo mesmo problema; aprovação também abaixo da alçada
+- **Contexto:** 6 tickets da fila (1 no Reclame Aqui: AT116524) já têm reenvio ou nova produção registrados para o mesmo pedido, abertos em contato anterior. A política mandava repor de novo.
+- **Decisão (política):** em avaria, item faltante e personalização, antes de olhar prazo e foto, `politicas.py` procura reposição do mesmo tipo para o pedido:
+  - em andamento → situação `em_andamento`: informar o andamento, sem dinheiro;
+  - já entregue e o cliente reclama de novo → `escalar` para a supervisão.
+- **Decisão (ferramenta):** `solicitar_aprovacao` passa a aceitar valores **abaixo** da alçada. Os freios internos do agente (teto e segunda resolução de cliente novo, no CLAUDE.md) são mais rígidos que a alçada do papel e precisam de uma pessoa sem tratar o caso como suspeita. A mensagem no canal do time indica "freio interno do agente".
+- **Descartado:** usar `sinalizar_suspeita` para os freios de novos. Isso marcaria como suspeito um cliente sem nenhuma evidência contra ele, contrariando o CLAUDE.md ("rigor baseado em evidência, não em desconfiança").
+
 ## D-015 · Modo público: mensagens do Reclame Aqui saem sem pedido completo e sem rastreio
 - **Contexto:** a resposta no Reclame Aqui é pública (CLAUDE.md, "Escopo do MVP"). Algumas ferramentas mandavam texto pronto com o número do pedido e o código de rastreio, que ficariam expostos na internet.
 - **Decisão:** toda mensagem ao cliente passa por `_mensagem` em `acoes.py`, que aplica o filtro do canal.

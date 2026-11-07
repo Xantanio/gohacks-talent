@@ -521,10 +521,10 @@ def _solicitar_aprovacao(amb: Ambiente, trilha: dict, acao: str, valor: Any, jus
     v, erro = _valor(valor)
     if erro:
         return _erro(erro)
+    # Abaixo da alçada também é aceito: freios internos do agente (teto e 2ª resolução de cliente novo) são
+    # mais rígidos que a alçada do papel e pedem uma pessoa sem tratar o caso como suspeita (D-016).
     limite = CATALOGO[acao].limites.get("valor_max_sem_aprovacao_rs")
-    if limite is not None and v <= limite:
-        return _erro(f"R$ {v:.2f} está dentro da alçada de {acao} (R$ {limite:.2f}): execute direto, "
-                     "ou use sinalizar_suspeita se a dúvida for sobre a veracidade")
+    dentro_da_alcada = limite is not None and v <= limite
     pedido, erro = _pedido_da_conversa(amb, order_id)
     if erro:
         return _erro(erro)
@@ -539,7 +539,8 @@ def _solicitar_aprovacao(amb: Ambiente, trilha: dict, acao: str, valor: Any, jus
         "solicitado_em": amb.estado.agora_txt(), "status": "pendente", "aprovado_por": None,
         "decidido_em": None, "comentario": None, "usada_em": None,
     }
-    slack = _postar_no_canal(amb, "APROVAÇÃO", f"{acao} de R$ {v:.2f} no pedido {order_id} (acima da alçada)", {
+    motivo_titulo = "freio interno do agente" if dentro_da_alcada else "acima da alçada"
+    slack = _postar_no_canal(amb, "APROVAÇÃO", f"{acao} de R$ {v:.2f} no pedido {order_id} ({motivo_titulo})", {
         "Aprovação": apr_id, "Conversa": amb.conversa_atual, "Justificativa": justificativa,
         "Por que": trilha.get("por_que"), "O que esperamos": f"aprovar_acao ou rejeitar_acao em {apr_id}",
     }, urgencia="alta")

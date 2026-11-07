@@ -4,7 +4,7 @@ Pergunta que este módulo responde: "pela POLÍTICA, o que este caso permite e o
 Não decide se a reclamação é verdadeira (`veracidade.py`) nem escolhe entre aprovar, escalar ou pedir
 foto pelo custo esperado (`decisao.py`). A saída é uma `Avaliacao` com:
 
-- situacao:  elegivel | nao_elegivel | falta_informacao | escalar
+- situacao:  elegivel | nao_elegivel | falta_informacao | em_andamento | escalar
 - passos:    ferramentas sugeridas, na ordem, com parâmetros (inclui solicitar_aprovacao quando passa da alçada)
 - fatos:     frases verificáveis que justificam a avaliação (vão para trilha.evidencias)
 - `trilha()` monta o dict de trilha (por_que, regra, evidencias, origem="regra") pronto para as ferramentas.
@@ -194,7 +194,7 @@ class Passo:
 @dataclass
 class Avaliacao:
     categoria: str
-    situacao: str                     # elegivel | nao_elegivel | falta_informacao | escalar
+    situacao: str                     # elegivel | nao_elegivel | falta_informacao | em_andamento | escalar
     resumo: str                       # uma frase para humano
     passos: list[Passo] = field(default_factory=list)
     alternativas: list[list[Passo]] = field(default_factory=list)  # ex.: reenvio OU reembolso, à escolha do cliente
@@ -375,8 +375,37 @@ def _fotos_validas(f: Fatos) -> list[dict[str, Any]]:
             and (entrega is None or _ts(a["enviado_em"]) >= entrega)]
 
 
+_TIPO_REPOSICAO = {"reenviar_produto": "reenvio", "reimprimir_personalizacao": "nova_producao"}
+
+
+def _reposicao_existente(f: Fatos, acao: str) -> tuple[str | None, dict[str, Any] | None]:
+    """Já há reenvio/nova produção para ESTE pedido? -> ('em_andamento' | 'entregue', registro)."""
+    tipo = _TIPO_REPOSICAO.get(acao)
+    for t in f.trocas_pedido:
+        if t.get("tipo") == tipo and t.get("status") != "cancelado":
+            return ("entregue" if t.get("status") == "entregue" else "em_andamento"), t
+    return None, None
+
+
 def _caso_com_foto(categoria: str, f: Fatos, acao: str, params: dict[str, Any], valor: float,
                    fatos: list[str]) -> Avaliacao:
+    # Nunca pagar duas vezes pelo mesmo problema: reposição já aberta para o pedido (D-016).
+    situacao_rep, rep = _reposicao_existente(f, acao)
+    if situacao_rep == "em_andamento":
+        return Avaliacao(categoria, "em_andamento",
+                         f"Reposição já aberta para este pedido ({rep['solicitacao_id']}, {rep['status']}): "
+                         "informar o andamento, sem nova ação.",
+                         passos=[Passo("responder_cliente", nota=f"informar que a reposição {rep['solicitacao_id']} "
+                                                                 f"está {rep['status']}")],
+                         fatos=fatos + [f"reposição {rep['solicitacao_id']} ({rep['tipo']}) solicitada em "
+                                        f"{rep['data_solicitacao']}, status {rep['status']}"])
+    if situacao_rep == "entregue":
+        return Avaliacao(categoria, "escalar",
+                         f"Reposição {rep['solicitacao_id']} já entregue e o cliente reclama de novo: uma pessoa avalia.",
+                         passos=[Passo("acionar_pessoa", {"area": "supervisão", "urgencia": "media",
+                                                          "assunto": f"2ª reclamação após reposição — {f.pedido['order_id']}"})],
+                         fatos=fatos + [f"reposição {rep['solicitacao_id']} entregue em {rep.get('data_entrega')}"],
+                         escalar={"area": "supervisão", "urgencia": "media", "motivo": "reclamação após reposição"})
     prazo, erro = _prazo_do_recebimento(f, categoria)
     if erro:
         return Avaliacao(categoria, "nao_elegivel", f"Não se aplica: {erro}.", fatos=fatos + [erro],
