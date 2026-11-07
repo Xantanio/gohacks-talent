@@ -163,6 +163,12 @@ A implementar junto com `llm.py` / `agente.py`:
 | 8 | **Agente analista**: 4 ferramentas simuladas, detecção de incidentes (impressora, transportadora+UF, brinde por CD, lote por item, gateway), aviso proativo (consentimento, 300/dia, prazo de 7 dias), passagem atendente → analista | ✅ (`python -m src.analista`; `tests/test_analista.py`; D-025, D-026) |
 | 8b | **Ciclo da mão levantada + semana**: pendências (aprovação, suspeita, publicação, cosmetovigilância, decisão de negócio) → `supervisor.py` decide → agente retoma; `semana.py` (`--semana`) avança até 08/11 cobrando prazos e com analista diário | ✅ (`tests/test_supervisor_semana.py`; D-027) |
 | 9 | **Interface Streamlit** (`streamlit run app.py`): fila + dossiês, supervisor humano (fecha o ciclo), analista, canal do time, semana, auditoria | ✅ (`tests/test_app.py`; D-028). API descartada por ora |
+| 10 | README (como rodar, roteiro da demo, arquitetura, limitações, próximas melhorias) | ✅ |
+| 11 | WhatsApp: SLA de 30 min só em horário comercial (8h–20h) + validação ao vivo de e-mail e WhatsApp | ⬜ |
+| 12 | Entrada de conversas novas durante a semana (ex.: cliente envia a foto pedida e o caso continua) | ⬜ |
+| 13 | Pedidos de colegas no canal do time (`responder_colaborador`, dentro da política) | ⬜ |
+| 14 | Avisos do analista revisados pelo juiz, como as respostas | ⬜ |
+| 15 | Remover o protótipo antigo `tests/main.py` e `tests/client.py` (inventa ação de cupom; fora do git) | ⬜ confirmar com o usuário |
 
 Visão 360° (**implementada**, D-026): agente **analista** que acha contatos repetidos com causa comum (impressora, transportadora+UF, brinde por CD, lote por item, cobrança em dobro) → `abrir_incidente` + `notificar_clientes` antes do cliente escrever. Trabalha chamado pelo atendente (quando o ticket pertence a um padrão) e por conta própria (varredura no fim da execução).
 
