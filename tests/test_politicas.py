@@ -59,7 +59,7 @@ def test_brinde_faltante_sem_foto_pede_foto(amb):
     a = avaliar(amb, "AT116501", "item_faltante", sku_alvo="GBT-9001")
     assert a.situacao == "falta_informacao" and ferramentas(a) == ["solicitar_foto"]
     assert a.valor_acao == 24.90  # brinde vale o custo unitário
-    assert any("campanha" in f for f in a.fatos)
+    assert any("consta nos itens do pedido" in f for f in a.fatos)
 
 
 def test_reposicao_ja_aberta_nao_repete_o_gasto(amb):
@@ -185,6 +185,14 @@ def test_avaria_cara_pede_aprovacao(amb):
     f = replace(f, pedido={**f.pedido, "valor_produtos": 350.0, "valor": 362.9})
     a = P.avaliar("avaria_vazamento", f)
     assert a.acima_da_alcada and ferramentas(a) == ["solicitar_aprovacao", "reenviar_produto"]
+
+
+def test_brinde_que_consta_no_pedido_e_devido_mesmo_abaixo_do_minimo(amb):
+    # AT116614: R$ 119,70 em produtos (< R$ 129), mas a necessaire GBT-9001 está nos itens do pedido.
+    # Na 1ª versão a política negou publicamente no Reclame Aqui (D-024).
+    a = avaliar(amb, "AT116614", "item_faltante", sku_alvo="GBT-9001")
+    assert a.situacao != "nao_elegivel" and ferramentas(a) == ["solicitar_foto"]
+    assert any("consta nos itens do pedido" in f for f in a.fatos)
 
 
 def test_brinde_nao_devido_abaixo_do_minimo(amb):

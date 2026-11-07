@@ -96,7 +96,8 @@ def test_casos_chave(execucao):
     _, res, _ = execucao
     feitas = lambda cid: [e["ferramenta"] for e in res[cid].executados if e["ok"]]  # noqa: E731
     assert "solicitar_foto" in feitas("AT116501")                  # brinde sem foto: pede foto
-    assert "negar_por_politica" in feitas("AT116614")              # brinde não devido
+    assert "solicitar_foto" in feitas("AT116614")                  # brinde consta no pedido: devido (D-024)
+    assert "negar_por_politica" not in feitas("AT116614")
     assert "solicitar_aprovacao" in feitas("AT116520")             # reembolso acima da alçada
     assert "reembolsar" not in feitas("AT116520")                  # ...e não executa antes da aprovação
     assert any("aprovacao_id" in p for p in res["AT116520"].pendentes)

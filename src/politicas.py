@@ -471,7 +471,10 @@ def _item_faltante(f: Fatos, sku_alvo: str | None = None, quantidade_faltante: i
     # Sem sku_alvo a ação vale para o pedido inteiro; quem chama (classificação) diz se a falta é do brinde.
     brinde = next((i for i in f.itens if i.get("tipo_item") == "brinde"), None)
     eh_brinde = sku_alvo is not None and (sku_alvo == (brinde or {}).get("sku") or sku_alvo.startswith("GBT-"))
-    if eh_brinde:
+    if eh_brinde and brinde is not None and sku_alvo == brinde["sku"]:
+        # O brinde consta nos itens do pedido: a empresa se comprometeu, é devido mesmo abaixo do mínimo (D-024).
+        fatos.append(f"brinde {brinde['sku']} consta nos itens do pedido (compromisso assumido na venda)")
+    elif eh_brinde:
         devido, motivo = brinde_devido(f)
         fatos.append(motivo)
         if not devido:

@@ -79,8 +79,8 @@ def test_politica_manda_primeiro_nos_tickets_do_reclame_aqui():
     assert [p.ferramenta for p in d.passos] == ["solicitar_aprovacao", "reembolsar"]
     d = D.decidir_ticket(amb, "AT116568", "reacao_adversa")
     assert d.requer_humano and d.passos[0].ferramenta == "orientar_suspensao_uso"
-    d = D.decidir_ticket(amb, "AT116614", "item_faltante", sku_alvo="GBT-9001")  # brinde não devido
-    assert [p.ferramenta for p in d.passos] == ["negar_por_politica"]
+    d = D.decidir_ticket(amb, "AT116614", "item_faltante", sku_alvo="GBT-9001")  # brinde no pedido (D-024)
+    assert [p.ferramenta for p in d.passos] == ["solicitar_foto"]
 
 
 # ---- dinheiro com base em foto ----------------------------------------------

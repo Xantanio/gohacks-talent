@@ -5,6 +5,11 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-024 · Brinde que consta nos itens do pedido é devido (correção de erro)
+- **Erro encontrado:** ao analisar repetições, o AT116614 apareceu no grupo "brinde faltando no CD2". A política tinha **negado publicamente** no Reclame Aqui com "brinde não era devido: R$ 119,70 abaixo do mínimo de R$ 129". Mas o brinde GBT-9001 **estava nos itens do pedido**: a empresa o vendeu e se comprometeu a enviar. O ERP aplicou a campanha pelo valor total (R$ 130,63 com frete). São 28 pedidos nessa situação.
+- **Decisão:** se a linha do brinde está em `itens_pedido`, o brinde é devido e segue o fluxo normal de item faltante (foto, prazo, reenvio). As regras da campanha (marca, período, mínimo) só são conferidas quando o pedido **não** tem a linha do brinde.
+- **Por que passou:** o teste antigo afirmava a negativa como comportamento esperado. Os testes foram corrigidos e há um teste de regressão com o AT116614.
+
 ## D-023 · Documento de prompts gerado a partir do código; Jev sem número de pedido
 - **Contexto:** o usuário pediu um arquivo com os prompts de todos os agentes, para validação.
 - **Decisão:** `docs/PROMPTS.md` é **gerado** por `python -m src.documentar_prompts` a partir das constantes de `src/llm.py` e `src/agente.py`. Ele traz visão geral (modelo, versão, parâmetros), prompts completos, exemplo real renderizado (AT116524, sem chamar o proxy), regras do validador, onde ficam os registros e uma lista de verificação. `tests/test_prompts_doc.py` falha se o arquivo divergir do código. A mensagem de reescrita virou a constante `MENSAGEM_REESCRITA`.
