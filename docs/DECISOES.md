@@ -5,6 +5,20 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-028 · Interface da demo em Streamlit (no lugar da API)
+- **Contexto:** o item 9 previa uma API FastAPI "para demo". Na demo, quem avalia precisa **ver** o agente trabalhar e uma pessoa precisa **agir** como supervisor, para fechar o ciclo da D-027. Nada no projeto pede integração com outro sistema.
+- **Decisão:** `app.py` em Streamlit (`streamlit run app.py`), com seis abas:
+  - **Fila:** tickets priorizados e o dossiê de cada um.
+  - **Supervisor:** formulários por tipo de pendência que chamam `supervisor.py`; o agente retoma na hora.
+  - **Analista:** incidentes, evidências, avisos e o que foi verificado sem incidente.
+  - **Canal do time.**
+  - **Semana:** +1 hora, +1 dia ou até 08/11, com os eventos.
+  - **Auditoria:** trilha de cada ação, validações do juiz e custo.
+  A barra lateral roda a fila com ou sem IA e mostra os números principais. O estado fica na sessão do navegador e a execução também grava `saida/<data>/`.
+- **Descartado:** FastAPI. Exigiria um cliente para ser mostrada e não resolve o papel humano. Se surgir integração (ex.: n8n), a API é uma camada fina sobre `agente.rodar` e `supervisor.*`.
+- **Verificação:** `tests/test_app.py` roda a interface sem navegador (`streamlit.testing.AppTest`): rodar sem IA, liberar sem texto (pede texto), liberar com texto (publica) e +1 dia.
+- `requirements.txt` criado (pandas, requests, streamlit, pytest), com as versões do venv.
+
 ## D-027 · Ciclo da mão levantada fechado (pendências → supervisor → retomada) e semana simulada
 - **Contexto:** os agentes pediam aprovação, sinalizavam suspeita, retinham respostas e acionavam o supervisor, mas nada retomava o caso depois (ex.: o reembolso do AT116520 ficava eternamente "faltando aprovacao_id"). E o agente rodava só no tique 0.
 - **Pendências** (`Estado.pendencias`, exportadas em `pendencias.csv`). Toda mão levantada vira pendência com o necessário para retomar:
