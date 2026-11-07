@@ -68,6 +68,7 @@ class Candidato:
     abrir_chamados: bool = False
     custo_medio_contato: float = 0.0
     taxa_reclamacao: float = 0.0
+    chave: str = ""   # identidade estável do incidente (impressora, transportadora, CD...): o escopo pode crescer
 
     @property
     def gravidade(self) -> float:
@@ -178,7 +179,7 @@ def _detectar_maquina(tique: int) -> tuple[list[Candidato], list[str]]:
                            & (impressos["data_separacao"] >= fim + pd.Timedelta(days=1))]
         m = maquinas.loc[maq] if maq in maquinas.index else {}
         candidatos.append(Candidato(
-            tipo="maquina", escopo=f"{maq} ({m.get('cd', '?')}) impressos de {_fmt(ini)} a {_fmt(fim)}",
+            tipo="maquina", chave=maq, escopo=f"{maq} ({m.get('cd', '?')}) impressos de {_fmt(ini)} a {_fmt(fim)}",
             titulo=f"Falha de impressão na {maq}",
             evidencias=[f"{k['reclamaram']} de {k['entregues']} pedidos entregues reclamaram de personalização "
                         f"({k['taxa']:.0%}) nas semanas concentradas; demais impressoras no mesmo período: {k['base']:.0%}",
@@ -220,7 +221,7 @@ def _detectar_transportadora(tique: int) -> tuple[list[Candidato], list[str]]:
         afetados = sorted(set(escopo_peds["order_id"]) - set(reclamaram))
         det = ", ".join(f"{u} {int(sub.loc[u, 'atrasados'])}/{int(sub.loc[u, 'n'])}" for u in sorted(ufs))
         candidatos.append(Candidato(
-            tipo="transportadora_uf", escopo=f"{transp} / {', '.join(sorted(ufs))}",
+            tipo="transportadora_uf", chave=transp, escopo=f"{transp} / {', '.join(sorted(ufs))}",
             titulo=f"Atraso concentrado na {transp}",
             evidencias=[f"pedidos em trânsito atrasados por UF: {det}",
                         f"taxa de atraso nas demais transportadoras: {base:.0%}",
@@ -259,7 +260,7 @@ def _detectar_brinde_cd(tique: int) -> tuple[list[Candidato], list[str]]:
         reclamaram = sorted(set(recl["order_id"]))
         afetados = sorted(set(no_escopo["order_id"]) - set(reclamaram))
         candidatos.append(Candidato(
-            tipo="turno", escopo=f"separação do brinde no {cd} de {_fmt(ini)} a {_fmt(fim)}",
+            tipo="turno", chave=f"brinde {cd}", escopo=f"separação do brinde no {cd} de {_fmt(ini)} a {_fmt(fim)}",
             titulo=f"Brinde faltando nos pedidos separados no {cd}",
             evidencias=[f"{k['reclamaram']} de {k['entregues']} pedidos entregues reclamaram do brinde ({k['taxa']:.0%}) "
                         f"nas semanas concentradas; outro CD no mesmo período: {k['base']:.0%}",
@@ -297,7 +298,7 @@ def _detectar_lote(tique: int) -> tuple[list[Candidato], list[str]]:
                 if not top.empty else "nenhum")
         return [], [f"lotes: defeito de produto atribuído ao item citado não se concentra (maior: {quem}; "
                     f"{len(lp) - len(atrib)} reclamações não citam o produto do lote) → sem incidente"]
-    return [Candidato(tipo="lote", escopo=f"lote {lote}", titulo=f"Defeito concentrado no lote {lote}",
+    return [Candidato(tipo="lote", chave=lote, escopo=f"lote {lote}", titulo=f"Defeito concentrado no lote {lote}",
                       evidencias=[f"{n} pedidos com vazamento/tampa/rachadura citando o produto do lote {lote} "
                                   f"de {int(vendidos.get(lote, 0))} vendidos (base {base:.1%})"],
                       reclamaram=sorted(set(atrib.loc[atrib["lote"] == lote, "order_id"])), afetados=[])
@@ -323,7 +324,7 @@ def _detectar_gateway(tique: int) -> tuple[list[Candidato], list[str]]:
     metodos = det.groupby("order_id")["metodo"].apply(lambda s: "+".join(sorted(s))).value_counts().to_dict()
     conv = base_conversas(tique)
     reclamaram = sorted(set(recentes.index) & set(conv["order_id"].dropna()))
-    return [Candidato(tipo="gateway",
+    return [Candidato(tipo="gateway", chave="gateway",
                       escopo=f"cobranças duplicadas de {_fmt(agora - pd.Timedelta(days=7))} a {_fmt(agora)}",
                       titulo="Pico de cobrança duplicada no gateway",
                       evidencias=[f"{len(recentes)} pedidos com 2+ cobranças efetivas em 7 dias (média semanal "
@@ -389,17 +390,20 @@ def tratar(an: Ambiente, c: Candidato, origem: str = "varredura") -> Tratamento:
     trilha = {"por_que": f"{c.titulo}: {c.evidencias[0]}", "regra": "analista: taxa >= 3x as demais origens",
               "evidencias": c.evidencias, "origem": f"regra (analista, {origem})",
               "custo_esperado": c.gravidade}
-    existente = next((i for i in an.estado.incidentes if i["tipo"] == c.tipo and i["escopo"] == c.escopo), None)
+    existente = next((i for i in an.estado.incidentes if i["tipo"] == c.tipo
+                      and i.get("chave", i["escopo"]) == (c.chave or c.escopo)), None)
     if existente:  # já tratado (ex.: chamado pelo atendente): não repete escalação nem chamados; só avisa quem faltar
         t.incidente_id, t.ja_existia = existente["incidente_id"], True
         t.origem = str(existente.get("origem") or "").removeprefix("regra (analista, ").removesuffix(")")
     else:
         r = an.abrir_incidente(tipo=c.tipo, escopo=c.escopo, evidencias=" | ".join(c.evidencias), trilha=trilha)
         t.incidente_id = r.get("incidente_id")
+        if r.get("ok"):
+            an.estado.incidentes[-1]["chave"] = c.chave or c.escopo
     if not c.afetados or not c.texto_aviso:
         return t
 
-    if c.abrir_chamados and not t.ja_existia:
+    if c.abrir_chamados:  # inclusive pedidos que atrasaram depois da abertura (semana)
         abertos = {ch["order_id"] for ch in an.estado.chamados if ch["status"] == "aberto"}
         hist = dados.tabela("chamados_transportadora")
         abertos |= set(hist.loc[hist["status"] != "encerrado", "order_id"])
@@ -436,6 +440,11 @@ def tratar(an: Ambiente, c: Candidato, origem: str = "varredura") -> Tratamento:
                                     f"{PRAZO_REPOSICAO} dias: a política não permite prometer reposição. A falha foi "
                                     "nossa: decidir se estende o prazo e avisa esses clientes também."),
                           trilha={**trilha, "por_que": "decisão de negócio fora da política"})
+        an.estado.abrir_pendencia(
+            "decisao_negocio", resumo=f"{t.incidente_id}: estender o prazo de reposição para {len(t.fora_do_prazo)} "
+                                      f"clientes afetados ({c.titulo})?",
+            incidente_id=t.incidente_id, order_ids=list(t.fora_do_prazo), tipo_aviso=f"{c.tipo_aviso}_excecao",
+            texto_aviso=c.texto_aviso)
     return t
 
 
@@ -464,12 +473,16 @@ class Relatorio:
     sem_incidente: list[str]
 
 
-def varrer(amb: Ambiente) -> Relatorio:
-    """Por conta própria: roda todos os detectores (com métricas registradas no log) e trata cada incidente."""
+def varrer(amb: Ambiente, tique_deteccao: int | None = None) -> Relatorio:
+    """Por conta própria: roda todos os detectores (com métricas registradas no log) e trata cada incidente.
+
+    `tique_deteccao`: detectar com os dados de outro tique (a semana usa 0: os dados não evoluem entregas, então
+    reavaliar atraso no tique atual geraria atrasos falsos — D-027). O tratamento (avisos, chamados) é no tique atual.
+    """
     an = cadeira_analista(amb)
     for dim in ("maquina;dia", "transportadora;uf", "cd", "lote"):  # consultas registradas no log, para auditoria
         an.consultar_metricas(agrupar_por=dim, inicio=(an.agora - timedelta(days=JANELA_ANALISE_DIAS)).date().isoformat())
-    cands, notas = detectar(an.tique)
+    cands, notas = detectar(an.tique if tique_deteccao is None else tique_deteccao)
     return Relatorio([tratar(an, c) for c in cands], list(notas))
 
 

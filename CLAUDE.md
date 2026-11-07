@@ -161,6 +161,7 @@ A implementar junto com `llm.py` / `agente.py`:
 | 6 | `agente.py`: filtro `canais=["reclame_aqui"]`, priorização da fila, loop por ticket, **dossiê por ticket**, aprovação humana antes de publicar nos casos da seção Guardrails | ✅ (`python -m src.agente`; `tests/test_agente.py`; D-019) |
 | 7 | Trilha de decisão completa: trilha em toda ação ✅; justificativa de LLM/Jev, dossiê e `docs/DECISOES.md` sempre atualizado | 🔄 contínuo |
 | 8 | **Agente analista**: 4 ferramentas simuladas, detecção de incidentes (impressora, transportadora+UF, brinde por CD, lote por item, gateway), aviso proativo (consentimento, 300/dia, prazo de 7 dias), passagem atendente → analista | ✅ (`python -m src.analista`; `tests/test_analista.py`; D-025, D-026) |
+| 8b | **Ciclo da mão levantada + semana**: pendências (aprovação, suspeita, publicação, cosmetovigilância, decisão de negócio) → `supervisor.py` decide → agente retoma; `semana.py` (`--semana`) avança até 08/11 cobrando prazos e com analista diário | ✅ (`tests/test_supervisor_semana.py`; D-027) |
 | 9 | `api.py` para demo (substitui o protótipo `tests/main.py`, que inventa ação de cupom) | ⬜ |
 
 Visão 360° (**implementada**, D-026): agente **analista** que acha contatos repetidos com causa comum (impressora, transportadora+UF, brinde por CD, lote por item, cobrança em dobro) → `abrir_incidente` + `notificar_clientes` antes do cliente escrever. Trabalha chamado pelo atendente (quando o ticket pertence a um padrão) e por conta própria (varredura no fim da execução).
@@ -180,6 +181,8 @@ src/
   decisao.py       # custo esperado (LTV real ou potencial p/ novos), teto e limite de 1 auto p/ novos
   llm.py           # cliente do AI Proxy (Jev + chat) com registro de custo
   agente.py        # atendente: prioriza a fila e processa ticket a ticket; chama o analista ao perceber padrão
+  supervisor.py    # cadeira do supervisor: resolve pendências e dispara a retomada pelos agentes
+  semana.py        # semana simulada: prazos (75%/vencido), chamados sem resposta, analista diário
   analista.py      # analista: detecta incidentes (taxa + janela), abre incidente, avisa quem ainda não reclamou
   acoes_analista.py # ferramentas do analista (buscar_conversas, consultar_metricas, abrir_incidente, notificar_clientes)
   api.py           # FastAPI (opcional, para demo)

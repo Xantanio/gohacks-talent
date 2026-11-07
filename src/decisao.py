@@ -206,6 +206,17 @@ def decidir(amb: Ambiente, f: Fatos, av: Avaliacao, v: Veracidade) -> Decisao:
     c = custos(p, valor, vc)
     motivos = [f"p_verdadeira={p:.2f}; valor R$ {valor:.2f}; custo de negar verdadeira R$ {vc.custo_negar_verdadeira:.2f}"]
 
+    suspeita = amb.estado.suspeitas.get(f.conversation_id)
+    if suspeita and suspeita["status"] == "procedente":  # retomada após decisão humana (D-027): não sinaliza de novo
+        motivos.append(f"supervisor {suspeita['decidido_por']} julgou procedente: {suspeita['justificativa']}")
+        if av.acima_da_alcada:
+            return Decisao(**base, caminho="solicitar_aprovacao", passos=av.passos, resumo=av.resumo, motivos=motivos,
+                           alternativas=c, custo_esperado=c["supervisor"], p_verdadeira=p, requer_humano=True,
+                           intencao_resposta="informar que a solução foi encaminhada")
+        return Decisao(**base, caminho="executar", passos=av.passos, resumo=f"Procedente pelo supervisor: {av.resumo}",
+                       motivos=motivos, alternativas=c, custo_esperado=c["executar"], p_verdadeira=p,
+                       intencao_resposta="confirmar a solução concreta, sem mencionar a análise interna")
+
     fortes = [s for s in v.contra if s.nome in SINAIS_SEMPRE_SINALIZAR or s.lr >= P["LR_SINAL_FORTE"]]
     if fortes:
         motivos.append("evidência forte: " + ", ".join(s.nome for s in fortes) + " -> sinalizar sempre")

@@ -5,6 +5,34 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-027 · Ciclo da mão levantada fechado (pendências → supervisor → retomada) e semana simulada
+- **Contexto:** os agentes pediam aprovação, sinalizavam suspeita, retinham respostas e acionavam o supervisor, mas nada retomava o caso depois (ex.: o reembolso do AT116520 ficava eternamente "faltando aprovacao_id"). E o agente rodava só no tique 0.
+- **Pendências** (`Estado.pendencias`, exportadas em `pendencias.csv`). Toda mão levantada vira pendência com o necessário para retomar:
+
+| Tipo | Quem cria | Prazo |
+|---|---|---|
+| `aprovacao` | atendente | SLA do ticket (o cliente está esperando) |
+| `suspeita` | atendente | 24h, pela política |
+| `publicacao` | atendente (resposta retida: rascunho + mensagens de ferramenta retidas com parâmetros) | SLA do ticket |
+| `cosmetovigilancia` | atendente (sku, lote, fotos, descrição prontos) | 24h do primeiro relato |
+| `decisao_negocio` | analista (clientes fora do prazo de reposição) | — |
+
+- **Supervisor** (`supervisor.py`): cada decisão usa a ferramenta do catálogo com o papel certo, e o próprio agente retoma em seguida.
+  - **Aprovar** → o atendente executa a ação com o `aprovacao_id` e avisa o cliente.
+  - **Rejeitar** → resposta neutra, sem a justificativa interna.
+  - **Suspeita procedente** → o atendente reprocessa o ticket, e `decisao.py` não sinaliza de novo uma suspeita já julgada.
+  - **Liberar** → executa as mensagens retidas e publica o texto. Mesmo editado pela pessoa, o texto passa pelo validador.
+  - **Registrar cosmetovigilância.**
+  - **Estender prazo** → o analista avisa os clientes que tinham ficado de fora.
+  - As mensagens depois de decisão humana são textos fixos validados. A rejeição libera a palavra da ação negada, porque o validador por palavra-chave a leria como promessa (limite da D-018).
+- **Semana** (`semana.py`, `--semana`): o relógio avança de hora em hora até 08/11 23:00.
+  - Alerta pendência com 75% do prazo consumido e pendência vencida, **uma vez cada**.
+  - Chamados com transportadora sem resposta: **um alerta por transportadora por tique**. A primeira versão gerou 72 mãos levantadas de uma vez.
+  - O analista trata os incidentes todo dia às 08:00 (novo limite diário de avisos, chamados de pedidos novos no escopo).
+- **Limitação dos dados, que mudou o desenho:** durante a semana nenhum pedido é entregue e não há evento de rastreio novo. Reavaliar atraso no tique atual faria todo pedido em trânsito de toda transportadora parecer atrasado, e o incidente da Expressa Já "sumia" a partir de 04/11 porque a taxa de todas subia junto. Por isso a varredura diária detecta com os dados do tique 0 (`varrer(tique_deteccao=0)`) e só cuida do acúmulo. Com status de entrega evoluindo (API do evento), basta passar o tique atual. Pedidos criados na semana nunca são separados nos dados e não são tratados como atraso.
+- **Incidente com chave estável** (impressora, transportadora, CD): o escopo pode crescer na semana (uma UF nova) sem abrir incidente duplicado.
+- **Execução real** (Reclame Aqui + semana): 23 de 24 respondidos e 126 avisados. Ficaram 5 pendências; sem supervisor, todas venceram com os alertas devidos (é o que a interface vai resolver). 72 chamados da Expressa Já sem resposta da transportadora até 04/11.
+
 ## D-026 · Agente analista: detecção com taxa e janela, aviso proativo com travas, passagem do atendente
 - **Ferramentas simuladas** (`acoes_analista.py`):
   - `buscar_conversas`: até 500 resultados; filtro de lote **por item**.

@@ -63,6 +63,8 @@ class Estado:
     validacoes: list[dict[str, Any]] = field(default_factory=list)     # cada tentativa de texto: validador + juiz (D-022)
     incidentes: list[dict[str, Any]] = field(default_factory=list)     # abertos pelo analista (D-026)
     notificacoes: list[dict[str, Any]] = field(default_factory=list)   # avisos proativos, um por pedido (D-026)
+    pendencias: list[dict[str, Any]] = field(default_factory=list)     # mãos levantadas à espera de uma pessoa (D-027)
+    eventos: list[dict[str, Any]] = field(default_factory=list)        # o que aconteceu na semana simulada (D-027)
     _seq: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
@@ -103,6 +105,34 @@ class Estado:
         })
         return acao_id
 
+    # ------------------------------------------------------------------
+    # Pendências: o que espera uma pessoa e como retomar depois (D-027)
+    # ------------------------------------------------------------------
+    def abrir_pendencia(self, tipo: str, *, conversation_id: str | None = None, order_id: str | None = None,
+                        resumo: str = "", prazo: str | None = None, **dados_pendencia: Any) -> str:
+        pid = self.novo_id("PEN")
+        self.pendencias.append({
+            "pendencia_id": pid, "tipo": tipo, "status": "aberta", "conversation_id": conversation_id,
+            "order_id": order_id, "resumo": resumo, "criado_em": self.agora_txt(), "tique": self.tique,
+            "prazo": prazo, "dados": dados_pendencia, "alertas": [], "resolvido_por": None, "resolvido_em": None,
+            "resolucao": None,
+        })
+        return pid
+
+    def pendencia(self, pendencia_id: str) -> dict[str, Any] | None:
+        return next((p for p in self.pendencias if p["pendencia_id"] == pendencia_id), None)
+
+    def pendencias_abertas(self, tipo: str | None = None) -> list[dict[str, Any]]:
+        return [p for p in self.pendencias if p["status"] == "aberta" and (tipo is None or p["tipo"] == tipo)]
+
+    def resolver_pendencia(self, pendencia_id: str, por: str, resolucao: str, status: str = "resolvida") -> None:
+        p = self.pendencia(pendencia_id)
+        p.update(status=status, resolvido_por=por, resolvido_em=self.agora_txt(), resolucao=resolucao)
+
+    def registrar_evento(self, tipo: str, descricao: str, **extra: Any) -> None:
+        self.eventos.append({"tique": self.tique, "data_hora": self.agora_txt(), "tipo": tipo,
+                             "descricao": descricao, **extra})
+
     def enviar_mensagem(self, conversation_id: str, texto: str, ferramenta: str, autor: str,
                         publica: bool = False) -> str:
         message_id = self.novo_id("MSG", 6)
@@ -133,6 +163,10 @@ class Estado:
             "validacoes": _csv(pasta / "validacoes.csv", self.validacoes),
             "incidentes": _csv(pasta / "incidentes.csv", self.incidentes),
             "notificacoes": _csv(pasta / "notificacoes.csv", self.notificacoes),
+            # objetos internos de retomada (chaves com "_", ex.: o Ticket) não vão para o CSV
+            "pendencias": _csv(pasta / "pendencias.csv", [
+                {**p, "dados": {k: v for k, v in p["dados"].items() if not k.startswith("_")}} for p in self.pendencias]),
+            "eventos": _csv(pasta / "eventos_semana.csv", self.eventos),
         }
         caminho_log = pasta / "log_chamadas.jsonl"
         with caminho_log.open("w", encoding="utf-8") as f:
@@ -154,6 +188,6 @@ def _csv(caminho: Path, linhas: list[dict[str, Any]]) -> Path:
         w = csv.DictWriter(f, fieldnames=colunas)
         w.writeheader()
         for linha in linhas:
-            w.writerow({k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
+            w.writerow({k: (json.dumps(v, ensure_ascii=False, default=str) if isinstance(v, (dict, list)) else v)
                         for k, v in linha.items()})
     return caminho

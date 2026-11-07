@@ -168,6 +168,7 @@ class Resultado:
     confianca_baixa: str | None = None                    # análise do D-020 quando o Jev ficou em dúvida
     julgamento: llm.Julgamento | None = None              # último parecer do juiz (D-022)
     padroes: list[str] = field(default_factory=list)      # o que o analista fez quando o atendente o chamou (D-026)
+    retidos: list[dict[str, Any]] = field(default_factory=list)  # mensagens de ferramenta retidas (para liberar depois)
     erro: str | None = None
 
 
@@ -262,6 +263,44 @@ def _chamar_analista(amb: Ambiente, r: Resultado) -> None:
                + (f", {len(tr.fora_do_prazo)} fora do prazo para decisão humana" if tr.fora_do_prazo else "")))
 
 
+def _prazo_txt(inicio: Any, horas: float) -> str:
+    return (pd.Timestamp(inicio) + pd.Timedelta(hours=horas)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _abrir_pendencia_da_acao(amb: Ambiente, t: Ticket, d: Decisao, passo: Passo, res: dict[str, Any]) -> None:
+    """Ação que deixa algo à espera de uma pessoa vira pendência, com o que for preciso para retomar (D-027)."""
+    if passo.ferramenta == "solicitar_aprovacao":
+        depois = next((p for p in d.passos if p.params.get("aprovacao_id") == "<da aprovação>"), None)
+        params = {k: v for k, v in (depois.params if depois else {}).items() if k != "aprovacao_id"}
+        amb.estado.abrir_pendencia(
+            "aprovacao", conversation_id=t.conversation_id, order_id=passo.params.get("order_id"),
+            resumo=f"{passo.params['acao']} de R$ {float(passo.params['valor']):.2f}: {passo.params['justificativa']}",
+            prazo=_prazo_txt(t.referencia_sla, SLA_HORAS[t.canal]),  # o cliente espera: vale o SLA do ticket
+            aprovacao_id=res["aprovacao_id"], acao=passo.params["acao"], params=params,
+            valor=float(passo.params["valor"]), _ticket=t)
+    elif passo.ferramenta == "sinalizar_suspeita":
+        amb.estado.abrir_pendencia(
+            "suspeita", conversation_id=t.conversation_id, order_id=t.order_id, resumo=d.resumo,
+            prazo=_prazo_txt(amb.agora, float(POL["reclamacao_suspeita"]["prazo_decisao_horas"])),
+            sinais=passo.params.get("sinais"), _ticket=t)
+
+
+def _abrir_pendencia_cosmetovigilancia(amb: Ambiente, t: Ticket, f) -> None:
+    """Reação adversa: o registro é do supervisor, em até 24h do 1º relato. Deixa tudo pronto para ele."""
+    if any(p["tipo"] == "cosmetovigilancia" and p["conversation_id"] == t.conversation_id for p in amb.estado.pendencias):
+        return
+    sku = (f.pedido or {}).get("sku")
+    lote = next((i.get("lote") for i in f.itens if i["sku"] == sku), None) or (f.pedido or {}).get("lote_produto")
+    conversa = amb.ler_conversa(t.conversation_id)
+    relato = " ".join(m["texto"] or "" for m in conversa["mensagens"] if m["autor"] == "cliente")
+    amb.estado.abrir_pendencia(
+        "cosmetovigilancia", conversation_id=t.conversation_id, order_id=t.order_id,
+        resumo=f"registrar reação adversa a {sku} (lote {lote or 'não informado'})",
+        prazo=_prazo_txt(f.primeiro_relato, PRAZO_COSMETOVIGILANCIA_H),
+        sku=sku, lote=lote, fotos=";".join(a["anexo_id"] for a in f.anexos) or None,
+        descricao=mascarar_pii(relato)[:500])
+
+
 def processar(amb: Ambiente, t: Ticket, redigir: Callable[[list[dict[str, str]]], llm.Redacao] | None,
               julgar: Callable[[list[dict[str, str]]], llm.Julgamento] | None = None,
               com_analista: bool = False) -> Resultado:
@@ -302,6 +341,7 @@ def processar(amb: Ambiente, t: Ticket, redigir: Callable[[list[dict[str, str]]]
                 continue
             if passo.ferramenta in FERRAMENTAS_DE_MENSAGEM and reter:
                 r.pendentes.append(f"{passo.ferramenta} retido para revisão humana")
+                r.retidos.append({"ferramenta": passo.ferramenta, "params": dict(passo.params)})
                 continue
             falta = _faltando(passo)
             if falta:
@@ -314,7 +354,11 @@ def processar(amb: Ambiente, t: Ticket, redigir: Callable[[list[dict[str, str]]]
             if res.get("ok") and passo.ferramenta in FERRAMENTAS_DE_MENSAGEM:
                 mensagem_enviada = True
                 r.resposta, r.resposta_origem, r.publicada = res.get("texto"), "ferramenta", True
+            if res.get("ok"):
+                _abrir_pendencia_da_acao(amb, t, d, passo, res)
 
+        if d.categoria == "reacao_adversa":
+            _abrir_pendencia_cosmetovigilancia(amb, t, f)
         if com_analista:
             _chamar_analista(amb, r)
         if mensagem_enviada and not passos_texto_livre:
@@ -444,6 +488,11 @@ def _levantar_mao(amb: Ambiente, r: Resultado, rascunho: str | None) -> None:
                                      "evidencias": r.motivos_retencao, "origem": "regra"})
     r.executados.append({"ferramenta": "acionar_pessoa", "params": {"area": "supervisão"}, "ok": res.get("ok"),
                          "erro": res.get("erro"), "acao_id": res.get("acao_id"), "texto": None})
+    # pendência de publicação: o supervisor libera (com ou sem edição) ou descarta; o atendente publica (D-027)
+    amb.estado.abrir_pendencia(
+        "publicacao", conversation_id=t.conversation_id, order_id=t.order_id,
+        resumo="; ".join(r.motivos_retencao), prazo=_prazo_txt(t.referencia_sla, SLA_HORAS[t.canal]),
+        texto=rascunho, retidos=list(r.retidos), motivos=list(r.motivos_retencao), canal=t.canal, _ticket=t)
 
 
 def _escalar_sem_decisao(amb: Ambiente, r: Resultado, redigir) -> Resultado:
@@ -543,7 +592,8 @@ def dossie(r: Resultado, amb: Ambiente) -> str:
 def rodar(canais: list[str] | None = None, limite: int | None = None, usar_ia: bool = True,
           pasta_saida: str | Path = "saida", amb: Ambiente | None = None,
           classificar: Callable | None = None, redigir: Callable | None = None,
-          julgar: Callable | None = None, com_analista: bool = True) -> tuple[list[Resultado], Path]:
+          julgar: Callable | None = None, com_analista: bool = True,
+          semana: bool = False) -> tuple[list[Resultado], Path]:
     """Processa a fila dos `canais` (padrão: só Reclame Aqui, escopo do MVP). Retorna resultados e a pasta de saída.
 
     Com o analista: o atendente o chama ao perceber um padrão e, no fim, ele varre por conta própria (D-026).
@@ -573,6 +623,10 @@ def rodar(canais: list[str] | None = None, limite: int | None = None, usar_ia: b
     if com_analista:  # por conta própria: o que nenhum ticket acionou
         from . import analista
         relatorio = analista.varrer(amb)
+    eventos = None
+    if semana:  # avança até 08/11 23:00 cobrando prazos; analista todo dia às 08:00 (D-027)
+        from . import semana as sem
+        eventos = sem.simular(amb, com_analista=com_analista)
     pasta = Path(pasta_saida) / datetime.now().strftime("%Y%m%d-%H%M%S")
     (pasta / "dossies").mkdir(parents=True, exist_ok=True)
     for r in resultados:
@@ -581,6 +635,9 @@ def rodar(canais: list[str] | None = None, limite: int | None = None, usar_ia: b
     if relatorio is not None:
         from . import analista
         (pasta / "analista.md").write_text(analista.resumo(relatorio), encoding="utf-8")
+    if eventos is not None:
+        from . import semana as sem
+        (pasta / "semana.md").write_text(sem.resumo(eventos, amb), encoding="utf-8")
     (pasta / "resumo.md").write_text(resumo(resultados, canais, amb), encoding="utf-8")
     return resultados, pasta
 
@@ -594,6 +651,11 @@ def resumo(resultados: list[Resultado], canais: list[str], amb: Ambiente | None 
               f"antes de reclamar · detalhes em [analista.md](analista.md)", ""]
         L += [f"- {r.ticket.conversation_id} percebeu o padrão → {p}" for r in resultados for p in r.padroes]
         L.append("")
+    if amb is not None and amb.estado.pendencias:
+        abertas = amb.estado.pendencias_abertas()
+        tipos = pd.Series([p['tipo'] for p in abertas]).value_counts().to_dict() if abertas else {}
+        L += [f"Pendências para uma pessoa: {len(abertas)} abertas de {len(amb.estado.pendencias)} {tipos} "
+              "· ver pendencias.csv", ""]
     L += [f"Custo de IA: {llm.CUSTOS.resumo()}", "",
          "| # | Conversa | Prioridade | SLA (h) | Categoria | Caminho | Ações | Resposta |", "|---|---|---|---|---|---|---|---|"]
     for i, r in enumerate(resultados, 1):
@@ -613,8 +675,10 @@ def main() -> None:
     ap.add_argument("--sem-ia", action="store_true", help="não chama o proxy; tudo vai para revisão humana")
     ap.add_argument("--saida", default="saida")
     ap.add_argument("--sem-analista", action="store_true", help="não aciona o agente analista (incidentes e avisos)")
+    ap.add_argument("--semana", action="store_true", help="depois da fila, simula a semana até 08/11 (prazos, analista diário)")
     a = ap.parse_args()
-    resultados, pasta = rodar(a.canais, a.limite, not a.sem_ia, a.saida, com_analista=not a.sem_analista)
+    resultados, pasta = rodar(a.canais, a.limite, not a.sem_ia, a.saida, com_analista=not a.sem_analista,
+                              semana=a.semana)
     print(f"\n{len(resultados)} tickets · {sum(r.publicada for r in resultados)} respondidos · "
           f"{sum(bool(r.motivos_retencao) for r in resultados)} retidos · saída em {pasta}")
     print(f"Custo de IA: {llm.CUSTOS.resumo()}")
