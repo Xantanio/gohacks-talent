@@ -98,11 +98,12 @@ class Estado:
         })
         return acao_id
 
-    def enviar_mensagem(self, conversation_id: str, texto: str, ferramenta: str, autor: str) -> str:
+    def enviar_mensagem(self, conversation_id: str, texto: str, ferramenta: str, autor: str,
+                        publica: bool = False) -> str:
         message_id = self.novo_id("MSG", 6)
         self.mensagens.append({
             "message_id": message_id, "conversation_id": conversation_id, "timestamp": self.agora_txt(),
-            "tique": self.tique, "autor": autor, "ferramenta": ferramenta, "texto": texto,
+            "tique": self.tique, "autor": autor, "ferramenta": ferramenta, "publica": publica, "texto": texto,
         })
         return message_id
 

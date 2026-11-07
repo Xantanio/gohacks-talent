@@ -85,6 +85,21 @@ def mascarar_pii(texto: str | None) -> str | None:
     return texto
 
 
+CANAIS_PUBLICOS = frozenset({"reclame_aqui"})
+_RE_PEDIDO = re.compile(r"\b(G[BC]H)\d{3}(\d{3})\b")
+# Formatos de rastreio dos dados: EJ/CA + 9 dígitos + BR, VL + 11, RPS + 9, TN + 10.
+_RE_RASTREIO = re.compile(r"\b(?:[A-Z]{2}\d{9}BR|VL\d{11}|RPS\d{9}|TN\d{10})\b")
+
+
+def mascarar_publico(texto: str | None) -> str | None:
+    """Para resposta pública (Reclame Aqui): PII + número de pedido mascarado (GBH***723) + sem código de rastreio."""
+    if not texto:
+        return texto
+    texto = mascarar_pii(texto)
+    texto = _RE_PEDIDO.sub(r"\1***\2", texto)
+    return _RE_RASTREIO.sub("[código de rastreio omitido]", texto)
+
+
 # ---------------------------------------------------------------------------
 # Ambiente (relógio + papel + log)
 # ---------------------------------------------------------------------------

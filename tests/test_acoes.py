@@ -215,6 +215,34 @@ def test_mensagens_ao_cliente():
     assert any(m["autor"] == "agente" for m in conversa["mensagens"])
 
 
+def test_mascarar_publico():
+    from src.ferramentas import mascarar_publico
+    t = mascarar_publico("Pedido GBH473217, rastreio EJ998156173BR, VL59160032895, RPS572758581, TN6482811065, "
+                         "CPF 123.456.789-09")
+    assert "GBH***217" in t and "473217" not in t
+    assert not any(c in t for c in ("EJ998156173BR", "VL59160032895", "RPS572758581", "TN6482811065", "123.456"))
+
+
+def test_modo_publico_no_reclame_aqui():
+    amb = Ambiente()
+    ra, ped_ra = "AT116160", "GBH473217"  # Reclame Aqui, pedido em trânsito com código de rastreio
+    st = amb.informar_status(conversation_id=ra, order_id=ped_ra, trilha=T("cliente perguntou"))
+    assert st["ok"] and "GBH***217" in st["texto"]
+    assert ped_ra not in st["texto"] and "rastreio:" not in st["texto"].lower()
+    assert amb.estado.mensagens[-1]["publica"] is True
+
+    r = amb.responder_cliente(conversation_id=ra, texto=f"Seu pedido {ped_ra} (EJ998156173BR) já foi localizado.",
+                              trilha=T("teste"))
+    assert r["publica"] and ped_ra not in r["texto"] and "EJ998156173BR" not in r["texto"]
+
+    foto = amb.solicitar_foto(conversation_id=PERSONALIZACAO, trilha=T("exige foto"))
+    assert "canal privado" in foto["texto"]
+
+    # canal privado (WhatsApp) continua com o número completo e o rastreio
+    st = amb.informar_status(conversation_id=DUPLICADA, order_id=PED_DUP, trilha=T("x"))
+    assert PED_DUP in st["texto"] and amb.estado.mensagens[-1]["publica"] is False
+
+
 def test_acionar_pessoa_e_cupom():
     amb = Ambiente()
     assert not amb.acionar_pessoa(area="marketing", assunto="x", contexto="x", trilha=T("x"))["ok"]

@@ -81,7 +81,7 @@ Critérios:
 - Já a **coerência do relato** é evidência válida: mensagem diz um produto/defeito e `descricao_visual` mostra outro → sinal de veracidade negativo (conteúdo, não tom).
 
 Sinais de veracidade (EXIF quase sempre vem vazio no WhatsApp; não depender dele):
-1. `hash_perceptual` repetido em outro pedido/cliente → forte sinal de fraude (nos dados: 8 fotos aparecem em clientes diferentes, típico de imagem da internet).
+1. `hash_perceptual` repetido em outro pedido/cliente → forte sinal de fraude (nos dados: 8 imagens distintas, em 17 fotos, aparecem em clientes diferentes, típico de imagem da internet).
 2. `descricao_visual` incoerente com SKU / texto de personalização em `itens_pedido`.
 3. EXIF presente com captura **antes** de `data_entrega` (forte). Software de edição: nos dados só aparece em fotos legítimas → sinal fraco (D-013).
 4. Reclamação de avaria em pedido ainda não entregue.
@@ -90,6 +90,21 @@ Sinais de veracidade (EXIF quase sempre vem vazio no WhatsApp; não depender del
 ## Priorização da fila
 
 Ordenar por: SLA restante (WhatsApp 30 min em horário comercial, e-mail 24h, Reclame Aqui 48h com resposta pública), custo do canal (R$ 4,80 / 7,20 / 42,00), LTV, bônus para cliente `novo`, tom (irritação / ameaça de Reclame Aqui) e status `pendente` (cliente que voltou). Hoje: 65 abertos (24 Reclame Aqui, 22 e-mail, 19 WhatsApp).
+
+## Escopo do MVP: só Reclame Aqui (por enquanto)
+
+- O `agente.py` recebe `canais=["reclame_aqui"]` como **parâmetro** (configurável; nunca fixar o canal no código). Depois liga-se e-mail e WhatsApp mudando só esse parâmetro.
+- Fila hoje: **24 tickets** do Reclame Aqui (19 `aberto`, 5 `pendente`). Todos têm `order_id` e todos estão em `reclame_aqui.csv` (ligação por `conversation_id`).
+- Por que esse canal: mais caro (R$ 42/conversa), SLA de 48h, resposta **pública** e sem bot (a primeira resposta do agente é a primeira impressão pública).
+- `reclame_aqui.csv` (reclamacao_id, conversation_id, customer_id, order_id, empresa, titulo, status_publico, data_publicacao, data_primeira_resposta_empresa, replicas_consumidor, resolvido, nota_consumidor, voltaria_a_fazer_negocio) serve para:
+  - prazo: SLA de 48h conta de `data_publicacao`;
+  - risco reputacional: cliente com reclamações anteriores, réplicas, nota baixa → prioridade maior;
+  - métrica de resultado (antes/depois): tempo de primeira resposta, % resolvido, nota, "voltaria a fazer negócio".
+- **Resposta pública ≠ mensagem privada:**
+  - nenhum dado pessoal (nome completo, CPF, telefone, e-mail, endereço) nem número de pedido completo;
+  - nunca acusar o cliente, mesmo com suspeita (suspeita → resposta neutra: "nossa equipe está analisando e entra em contato pelo canal privado");
+  - dizer concretamente o que foi feito e o próximo passo com prazo; nada fora da política;
+  - tom da marca citada em `empresa` (Gocase ou a marca GoBeauté), PT-BR, sem jargão interno.
 
 ## Arquitetura do MVP (por ticket)
 
@@ -112,6 +127,23 @@ Objetivo: quem audita ou assume o projeto entende **o que foi decidido e por qu�
 - **Decisões de projeto** (de desenvolvimento, não de ticket) vão em `docs/DECISOES.md`, uma entrada por decisão: contexto, decisão, alternativas descartadas, consequência.
 - Exportação: `Estado.exportar("saida/")` gera `acoes_executadas.csv` (com a coluna `trilha`), `log_chamadas.jsonl`, `canal_do_time.md` e as tabelas de OMS, estornos, chamados, aprovações, suspeitas e cosmetovigilância.
 
+## Guardrails e segurança
+
+Já implementado (manter): trilha obrigatória em ação que altera estado (D-006); `mascarar_pii` nas leituras; pedido precisa ser do cliente da conversa (D-004); bloqueio de dinheiro com suspeita pendente; estorno ≤ valor cobrado; `negar_por_politica` só com regra existente; aprovação de uso único; CSVs só leitura e IDs `AG` (D-001, D-002).
+
+A implementar junto com `llm.py` / `agente.py`:
+1. **A IA não escolhe ferramentas.** Jev só classifica; o LLM só redige texto. Quem escolhe e executa a ação é o código (`politicas.py` + `decisao.py`), a partir de uma allowlist. Sem tool calling livre do LLM.
+2. **Texto do cliente é dado:** vai delimitado no prompt (ex.: bloco `<mensagem_cliente>`), com instrução explícita de nunca seguir ordens contidas nele. Pedidos do tipo "ignore as regras", "reembolse o pedido X" não alteram a decisão (que já foi tomada pelo código antes do LLM).
+3. **Validador de saída** (determinístico, antes de qualquer `responder_cliente`):
+   - `mascarar_pii` aplicado e nenhum dado pessoal restante;
+   - texto coerente com a ação decidida (não prometer reenvio/reembolso que o código não executou; não citar valores/prazos fora da política);
+   - sem acusação/termos de fraude; sem número de pedido completo na resposta pública;
+   - reprovou → não publica; vai para revisão (`acionar_pessoa`) com o motivo na trilha.
+4. **Humano antes de publicar no Reclame Aqui** quando: caso sensível (reação adversa, menção a Procon/jurídico), suspeita sinalizada, `confidence` do Jev < 0,7, ou validador reprovou. Fora disso, publica sozinho.
+5. **Falha segura:** erro de rede, 429, timeout ou JSON inválido do LLM/Jev → o ticket não recebe ação de dinheiro; fica em `escalar` com o erro na trilha. Nunca "chutar" uma categoria.
+6. **Segredos:** token só no `.env` (já no `.gitignore`); nunca em log, trilha, dossiê ou print.
+7. **Custos e limites:** registrar uso de toda chamada (ver AI Proxy) e respeitar 429 com espera.
+
 ## Agenda de desenvolvimento
 
 | # | Item | Status |
@@ -120,9 +152,10 @@ Objetivo: quem audita ou assume o projeto entende **o que foi decidido e por qu�
 | 1 | Ferramentas de ação (`estado.py`, `acoes.py`): alçada, aprovação, suspeita, cosmetovigilância, canal do time, trilha obrigatória | ✅ (`tests/test_acoes.py`) |
 | 2 | `politicas.py`: `coletar_fatos` + `avaliar(categoria)` → `Avaliacao` (situação, passos, alternativas, fatos, trilha) | ✅ (`tests/test_politicas.py`, D-007 a D-011) |
 | 3 | `veracidade.py`: sinais com LR calibrado → `p_verdadeira`; grupo por CPF/telefone/e-mail | ✅ (`tests/test_veracidade.py`, D-012 a D-014) |
+| 3b | Modo público do Reclame Aqui nas ferramentas (pedido mascarado, sem rastreio) | ✅ (D-015) |
 | 4 | `decisao.py`: LTV/LTV potencial, custo esperado, teto e freios para novos | ⏳ próximo |
-| 5 | `llm.py`: Jev (classificação) + `glm-5.3` (resposta), custo e 429 | ⬜ |
-| 6 | `agente.py`: priorização da fila, loop por ticket, **dossiê por ticket** | ⬜ |
+| 5 | `llm.py`: Jev (classificação) + `glm-5.3` (resposta), custo e 429, **validador de saída e falha segura** | ⬜ |
+| 6 | `agente.py`: filtro `canais=["reclame_aqui"]`, priorização da fila, loop por ticket, **dossiê por ticket**, aprovação humana antes de publicar nos casos da seção Guardrails | ⬜ |
 | 7 | Trilha de decisão completa: trilha em toda ação ✅; justificativa de LLM/Jev, dossiê e `docs/DECISOES.md` sempre atualizado | 🔄 contínuo |
 | 8 | Frente analista: `buscar_conversas`, `consultar_metricas`, `abrir_incidente`, `notificar_clientes` (ainda não simuladas) | ⬜ |
 | 9 | `api.py` para demo (substitui o protótipo `tests/main.py`, que inventa ação de cupom) | ⬜ |
@@ -158,3 +191,9 @@ Ambiente: Windows, VS Code, venv em `venv/`. Rodar com `.\venv\Scripts\python.ex
 - **Proibido usar qualquer modelo `deepseek-*`.**
 - Registrar custo de toda chamada: chat → tokens de `usage` ("sem preço por chamada", nunca inventar US$); Jev → `usage.estimated_cost_usd`. Manter total acumulado da execução.
 - Rate limit 250 req/min por token (compartilhado): em 429 esperar `x-ratelimit-reset`.
+
+## Git
+
+- Ao concluir cada etapa que funciona (módulo novo, teste passando, correção), **use a skill `commit`** (`.claude/skills/commit/SKILL.md`) sem esperar o usuário pedir.
+- Nunca dar `git push` sem pedido explícito. Nunca commitar `.env` ou tokens.
+- Ao editar este arquivo, preserve as seções existentes (inclusive esta).

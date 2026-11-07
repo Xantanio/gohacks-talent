@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, Any, Callable
 import pandas as pd
 
 from . import dados
-from .ferramentas import CATALOGO, _ate_agora, _vazio, mascarar_pii, meta_conversa, pedido_na_posicao
+from .ferramentas import (CANAIS_PUBLICOS, CATALOGO, _ate_agora, _vazio, mascarar_pii, mascarar_publico,
+                          meta_conversa, pedido_na_posicao)
 
 if TYPE_CHECKING:
     from .ferramentas import Ambiente
@@ -167,8 +168,17 @@ def _postar_no_canal(amb: Ambiente, tipo: str, titulo: str, linhas: dict[str, An
     return item
 
 
-def _mensagem(amb: Ambiente, conversation_id: str, texto: str, ferramenta: str) -> str:
-    return amb.estado.enviar_mensagem(conversation_id, mascarar_pii(texto), ferramenta, amb.ator)
+def eh_publica(conversation_id: str) -> bool:
+    """Resposta visível para qualquer pessoa (Reclame Aqui): sem pedido completo, rastreio ou dado pessoal (D-015)."""
+    meta = meta_conversa(conversation_id)
+    return bool(meta) and meta["canal"] in CANAIS_PUBLICOS
+
+
+def _mensagem(amb: Ambiente, conversation_id: str, texto: str, ferramenta: str) -> tuple[str, str]:
+    """Envia ao cliente com o filtro do canal. Retorna (message_id, texto efetivamente enviado)."""
+    publica = eh_publica(conversation_id)
+    final = mascarar_publico(texto) if publica else mascarar_pii(texto)
+    return amb.estado.enviar_mensagem(conversation_id, final, ferramenta, amb.ator, publica=publica), final
 
 
 def _registrar(amb: Ambiente, acao: str, trilha: dict[str, Any], *, conversation_id: str | None = None,
@@ -201,10 +211,10 @@ def _responder_cliente(amb: Ambiente, trilha: dict, conversation_id: str, texto:
     _, erro = _conversa_aberta(amb, conversation_id)
     if erro:
         return _erro(erro)
-    limpo = mascarar_pii(texto)
-    msg_id = amb.estado.enviar_mensagem(conversation_id, limpo, "responder_cliente", amb.ator)
+    msg_id, limpo = _mensagem(amb, conversation_id, texto, "responder_cliente")
     acao_id = _registrar(amb, "responder_cliente", trilha, conversation_id=conversation_id, referencia=msg_id)
-    return {"ok": True, "acao_id": acao_id, "message_id": msg_id, "pii_mascarado": limpo != texto}
+    return {"ok": True, "acao_id": acao_id, "message_id": msg_id, "pii_mascarado": limpo != texto,
+            "publica": eh_publica(conversation_id), "texto": limpo}
 
 
 def _solicitar_foto(amb: Ambiente, trilha: dict, conversation_id: str, do_que: str | None = None) -> Resultado:
@@ -212,9 +222,13 @@ def _solicitar_foto(amb: Ambiente, trilha: dict, conversation_id: str, do_que: s
     if erro:
         return _erro(erro)
     alvo = do_que if not _vazio(do_que) else "do produto e da embalagem"
-    texto = (f"Para seguirmos com a sua solicitação, você pode nos enviar uma foto {alvo}? "
-             "Assim que recebermos, damos andamento rapidinho.")
-    msg_id = _mensagem(amb, conversation_id, texto, "solicitar_foto")
+    if eh_publica(conversation_id):  # foto pode mostrar etiqueta/endereço: nunca pedir em público
+        texto = (f"Para seguirmos com a sua solicitação, precisamos de uma foto {alvo}. Vamos pedir pelo canal "
+                 "privado, para não expor seus dados aqui, e damos andamento assim que recebermos.")
+    else:
+        texto = (f"Para seguirmos com a sua solicitação, você pode nos enviar uma foto {alvo}? "
+                 "Assim que recebermos, damos andamento rapidinho.")
+    msg_id, texto = _mensagem(amb, conversation_id, texto, "solicitar_foto")
     amb.estado.conversa(conversation_id)["aguardando_foto"] = True
     acao_id = _registrar(amb, "solicitar_foto", trilha, conversation_id=conversation_id, referencia=msg_id)
     return {"ok": True, "acao_id": acao_id, "message_id": msg_id, "texto": texto}
@@ -240,10 +254,11 @@ def _informar_status(amb: Ambiente, trilha: dict, conversation_id: str, order_id
     previsao = (ultimo or {}).get("previsao_entrega") or pedido.get("data_prometida")
     if previsao and pedido["status_entrega"] not in ("entregue", "cancelado"):
         partes.append(f"Previsão de entrega: {previsao}.")
-    if pedido.get("codigo_rastreio") and pedido["status_entrega"] != "aguardando_separacao":
+    publica = eh_publica(conversation_id)
+    if pedido.get("codigo_rastreio") and pedido["status_entrega"] != "aguardando_separacao" and not publica:
         partes.append(f"Código de rastreio: {pedido['codigo_rastreio']}.")
     texto = " ".join(partes)
-    msg_id = _mensagem(amb, conversation_id, texto, "informar_status")
+    msg_id, texto = _mensagem(amb, conversation_id, texto, "informar_status")
     acao_id = _registrar(amb, "informar_status", trilha, conversation_id=conversation_id, order_id=order_id,
                          referencia=msg_id)
     return {"ok": True, "acao_id": acao_id, "message_id": msg_id, "texto": texto}
@@ -279,7 +294,7 @@ def _orientar_suspensao_uso(amb: Ambiente, trilha: dict, conversation_id: str) -
     texto = ("Sentimos muito pelo que você está passando. Por segurança, suspenda o uso do produto agora. "
              "Se houver irritação, coceira, inchaço ou qualquer desconforto que persista, procure atendimento "
              "médico e leve a embalagem do produto. Nosso time de qualidade vai acompanhar o seu caso de perto.")
-    msg_id = _mensagem(amb, conversation_id, texto, "orientar_suspensao_uso")
+    msg_id, texto = _mensagem(amb, conversation_id, texto, "orientar_suspensao_uso")
     amb.estado.conversa(conversation_id)["orientacao_suspensao_em"] = amb.estado.agora_txt()
     acao_id = _registrar(amb, "orientar_suspensao_uso", trilha, conversation_id=conversation_id, referencia=msg_id)
     return {"ok": True, "acao_id": acao_id, "message_id": msg_id, "texto": texto}
@@ -312,7 +327,7 @@ def _negar_por_politica(amb: Ambiente, trilha: dict, conversation_id: str, regra
         return _erro("conversa com suspeita pendente: quem decide é o supervisor (decidir_suspeita)")
     texto = ("Entendemos o seu pedido e sentimos não poder atender desta vez. Pela nossa política: "
              f"{texto_regra} Se quiser, seguimos conversando para encontrar a melhor alternativa para você.")
-    msg_id = _mensagem(amb, conversation_id, texto, "negar_por_politica")
+    msg_id, texto = _mensagem(amb, conversation_id, texto, "negar_por_politica")
     acao_id = _registrar(amb, "negar_por_politica", trilha, conversation_id=conversation_id, referencia=msg_id)
     return {"ok": True, "acao_id": acao_id, "message_id": msg_id, "texto": texto}
 
@@ -322,7 +337,7 @@ def _agradecer(amb: Ambiente, trilha: dict, conversation_id: str) -> Resultado:
     if erro:
         return _erro(erro)
     texto = "Que alegria receber a sua mensagem! Obrigada pelo carinho, ele vai direto para o nosso time. 💛"
-    msg_id = _mensagem(amb, conversation_id, texto, "agradecer")
+    msg_id, texto = _mensagem(amb, conversation_id, texto, "agradecer")
     acao_id = _registrar(amb, "agradecer", trilha, conversation_id=conversation_id, referencia=msg_id)
     return {"ok": True, "acao_id": acao_id, "message_id": msg_id, "texto": texto}
 
@@ -594,7 +609,9 @@ def _decidir_suspeita(amb: Ambiente, trilha: dict, conversation_id: str, decisao
         # Resposta neutra, sem acusação (politicas.reclamacao_suspeita.comunicacao_com_cliente).
         texto = ("Analisamos com cuidado a sua solicitação e, com as informações disponíveis, não foi possível "
                  "seguir com o reenvio ou reembolso. Se tiver qualquer outra informação, é só nos responder.")
-        out["message_id"] = _mensagem(amb, conversation_id, texto, "decidir_suspeita")
+        if eh_publica(conversation_id):
+            texto += " Seguimos à disposição pelo canal privado."
+        out["message_id"], _ = _mensagem(amb, conversation_id, texto, "decidir_suspeita")
         est = amb.estado.conversa(conversation_id)
         est["encerrada"], est["motivo_encerramento"] = True, "suspeita_improcedente"
     return out

@@ -5,6 +5,19 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-015 · Modo público: mensagens do Reclame Aqui saem sem pedido completo e sem rastreio
+- **Contexto:** a resposta no Reclame Aqui é pública (CLAUDE.md, "Escopo do MVP"). Algumas ferramentas mandavam texto pronto com o número do pedido e o código de rastreio, que ficariam expostos na internet.
+- **Decisão:** toda mensagem ao cliente passa por `_mensagem` em `acoes.py`, que aplica o filtro do canal.
+  - Canal público (`CANAIS_PUBLICOS = {"reclame_aqui"}`): `mascarar_publico` = PII + pedido mascarado (`GBH***217`) + código de rastreio removido (formatos dos dados: EJ/CA…BR, VL, RPS, TN).
+  - Canal privado: só `mascarar_pii`.
+  - Textos que mudam no canal público:
+    - `informar_status` não inclui o código de rastreio;
+    - `solicitar_foto` avisa que a foto será pedida pelo canal privado, porque a foto pode mostrar etiqueta e endereço;
+    - `decidir_suspeita` (improcedente) termina com "Seguimos à disposição pelo canal privado."
+  - Cada mensagem registra `publica: true/false` no estado.
+- **Descartado:** confiar só no validador do LLM (item 5 da agenda). Os textos fixos das ferramentas não passam pelo LLM e vazariam do mesmo jeito.
+- **Consequência:** o validador de saída continua necessário para o texto livre do LLM. A máscara é a rede de segurança de último nível, porque se aplica a qualquer texto, inclusive ao do LLM.
+
 ## D-014 · Detecção de grupo: CPF, telefone ou e-mail sim; CEP sozinho não
 - **Contexto:** o CLAUDE.md pede para detectar grupos de clientes (sobretudo novos) com o mesmo endereço, telefone ou foto.
 - **Dados:** nenhum CPF, telefone ou e-mail é compartilhado entre clientes, mas **22 pares de clientes dividem CEP** por coincidência.
