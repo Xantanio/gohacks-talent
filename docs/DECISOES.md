@@ -5,6 +5,30 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-019 · Loop do agente: quem escreve a resposta, quando reter, como priorizar
+- **Fluxo por execução:** classificar todos os tickets dos `canais` (Jev) → priorizar → para cada ticket: `classificar_conversa` → fatos → política → veracidade → decisão → executar passos → responder ou reter → dossiê.
+- **Quem escreve:** ferramenta de mensagem escolhida pela decisão (`solicitar_foto`, `informar_status`, `negar_por_politica`, `orientar_suspensao_uso`, `agradecer`) → vale o texto fixo dela. Ele é seguro, já mascarado e deixa estado (ex.: "aguardando foto"). O LLM escreve só quando a decisão pede texto livre ou quando nenhuma mensagem saiu (reenvio executado, aprovação pedida, escalação).
+  - Descartado: LLM em toda resposta. Mandaria duas mensagens ao cliente ou perderia o registro de estado das ferramentas.
+- **Reter** (nada é publicado; o rascunho vai para a supervisão no canal do time) quando:
+  - caso sensível ou ameaça externa (probabilidade > 0,5 no Jev);
+  - suspeita sinalizada;
+  - confiança < 0,7;
+  - validador reprovou;
+  - IA falhou ou foi desligada.
+- **Não executar** passo com parâmetro que o código não tem (aprovação pendente, novo endereço, código de cupom). Ele fica como "pendente" no dossiê.
+- **Prioridade:** soma explícita de pontos (`PESOS` em `agente.py`):
+  - SLA: vencido +50; senão até +40, proporcional ao tempo consumido;
+  - custo do canal, LTV, cliente novo, irritação, ameaça, `pendente`, réplicas no Reclame Aqui;
+  - **caso sensível** +30 e passa a usar o prazo regulatório de 24h se for mais curto que o SLA. Foi assim que a reação adversa (AT116568, 3h restantes) foi para o topo; antes ela aparecia com as 27h do SLA do Reclame Aqui.
+- **Validador, ajustes feitos com rascunhos reais:**
+  - Pode citar a reposição que **já existe** (`em_andamento`). Antes, o AT116524 era falso positivo.
+  - Pode citar ação **pendente de aprovação**, mas nunca como feita ("reembolsamos", "o reembolso foi processado"). Antes, o AT116520 era falso positivo.
+  - O glm recebe a transportadora real nos fatos: inventou "Correios" em 2 rascunhos, ambos reprovados.
+- **Execução real (Reclame Aqui, 24 tickets):** 19 respondidos (17 por ferramenta, 2 por LLM) e 5 retidos (1 reação adversa, 4 por confiança < 0,7 entre "atraso" e "onde está"). Custo: US$ 0,0012 no Jev e cerca de 6,8 mil tokens de chat. Nenhuma ação falhou.
+- **Limites conhecidos:**
+  - O validador não detecta **prazo inventado** (ex.: "em até 1 dia útil entraremos em contato", visto num rascunho retido).
+  - Os 4 retidos por confiança baixa são ambiguidade entre duas categorias que a política trata igual. Relaxar essa regra é decisão de negócio, não foi feito.
+
 ## D-018 · IA só classifica e redige; validador determinístico decide se publica
 - **Jev classifica** nas categorias da **política** (15 + "outros"), não nas 13 tags. A tag oficial sai de `tag_da_categoria`.
   - Na mesma chamada vêm urgência, irritação, ameaça externa, caso sensível, "falta brinde" e preferência (reembolso ou reenvio). Irritação serve só para prioridade e estilo.

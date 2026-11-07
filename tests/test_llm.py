@@ -60,6 +60,15 @@ def test_validador_pega_transportadora_inventada():
                                 transportadora="Expressa Já").ok
 
 
+def test_validador_acao_pendente_pode_ser_citada_mas_nao_como_feita():
+    pend = {"reembolsar"}
+    ok = "Encaminhamos para aprovação do reembolso; assim que aprovado, ele será processado."  # caso real AT116520
+    assert llm.validar_resposta(ok, publica=True, ferramentas_permitidas=set(), ferramentas_pendentes=pend).ok
+    for feito in ("Já reembolsamos o valor.", "O reembolso foi aprovado e processado."):
+        v = llm.validar_resposta(feito, publica=True, ferramentas_permitidas=set(), ferramentas_pendentes=pend)
+        assert not v.ok and "pendente" in v.motivos[0]
+
+
 def test_validador_aceita_valor_e_pedido_no_canal_privado():
     v = llm.validar_resposta("O estorno de R$ 118,80 do pedido GBH491723 foi solicitado.", publica=False,
                              ferramentas_permitidas={"reembolsar"}, valores_permitidos={118.80})

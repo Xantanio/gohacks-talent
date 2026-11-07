@@ -343,6 +343,13 @@ PROMESSAS = {
     "reembolsar": r"\b(reembols\w*|estorn\w*|devolu\w* do (seu )?dinheiro|dinheiro de volta)\b",
     "cancelar_pedido": r"\b(cancelad[oa]|cancelamos|cancelar(emos)?)\b",
 }
+# Para ação só PENDENTE (ex.: aguardando aprovação): pode ser citada, mas nunca como já feita.
+_ACAO = r"(reembols\w*|estorn\w*|reenvi\w*|troca|reimpress\w*|nova produ\w*|dinheiro)"
+CONCLUIDO = re.compile(
+    r"\b(reembolsamos|estornamos|reenviamos|reimprimimos|trocamos"                       # 1ª pessoa no passado
+    r"|(foi|foram) (reembolsad|estornad|reenviad|creditad|devolvid)\w*"                  # "foi estornado"
+    rf"|{_ACAO}\s+(\w+\s+){{0,3}}?(j[aá]\s+)?(foi|foram|est[aá])\s+"                     # "o reembolso já foi feito"
+    r"(aprovad|processad|feit|realizad|efetuad|conclu[ií]d|creditad|liberad)\w*)\b", re.I)
 _RE_VALOR = re.compile(r"R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:[.,]\d{2})?)")
 # Transportadoras dos dados + "Correios" (o modelo tende a inventar; nenhum pedido usa Correios).
 TRANSPORTADORAS = ("Expressa Já", "TransNorte", "Rápido Sul", "ViaLog", "Correio Ágil", "Correios")
@@ -364,7 +371,8 @@ def _valor_br(s: str) -> float:
 
 def validar_resposta(texto: str | None, *, publica: bool, ferramentas_permitidas: set[str],
                      valores_permitidos: set[float] = frozenset(), permite_cupom: bool = False,
-                     transportadora: str | None = None, max_caracteres: int = 1200) -> Validacao:
+                     transportadora: str | None = None, ferramentas_pendentes: set[str] = frozenset(),
+                     max_caracteres: int = 1200) -> Validacao:
     """Reprova texto que vaze dado, acuse, prometa o que o código não fez ou invente valor (Guardrails item 3).
 
     `ferramentas_permitidas`: ferramentas de dinheiro que a decisão executa ou oferece (alternativas).
@@ -381,8 +389,14 @@ def validar_resposta(texto: str | None, *, publica: bool, ferramentas_permitidas
         m.append(f"promete compensação inexistente: '{COMPENSACAO.search(texto).group(0)}'")
     for ferramenta, padrao in PROMESSAS.items():
         achado = re.search(padrao, texto, re.I)
-        if achado and ferramenta not in ferramentas_permitidas:
-            m.append(f"promete {ferramenta} ('{achado.group(0)}') que o sistema não decidiu")
+        if not achado or ferramenta in ferramentas_permitidas:
+            continue
+        if ferramenta in ferramentas_pendentes:
+            feito = CONCLUIDO.search(texto)
+            if feito:
+                m.append(f"apresenta {ferramenta} como feito ('{feito.group(0)}'), mas está pendente de aprovação")
+            continue
+        m.append(f"promete {ferramenta} ('{achado.group(0)}') que o sistema não decidiu")
     for v in _RE_VALOR.findall(texto):
         if not any(abs(_valor_br(v) - p) < 0.01 for p in valores_permitidos):
             m.append(f"cita valor R$ {v} que não está na decisão")
