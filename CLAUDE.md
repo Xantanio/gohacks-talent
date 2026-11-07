@@ -83,7 +83,7 @@ Critérios:
 Sinais de veracidade (EXIF quase sempre vem vazio no WhatsApp; não depender dele):
 1. `hash_perceptual` repetido em outro pedido/cliente → forte sinal de fraude (nos dados: 8 fotos aparecem em clientes diferentes, típico de imagem da internet).
 2. `descricao_visual` incoerente com SKU / texto de personalização em `itens_pedido`.
-3. EXIF presente com captura **antes** de `data_entrega`, ou software de edição.
+3. EXIF presente com captura **antes** de `data_entrega` (forte). Software de edição: nos dados só aparece em fotos legítimas → sinal fraco (D-013).
 4. Reclamação de avaria em pedido ainda não entregue.
 5. Histórico: `n_trocas_12m`, reenvios anteriores em `trocas_reenvios`.
 
@@ -119,8 +119,8 @@ Objetivo: quem audita ou assume o projeto entende **o que foi decidido e por qu�
 | 0 | `dados.py` + ferramentas de leitura (relógio, PII, validação do catálogo) | ✅ |
 | 1 | Ferramentas de ação (`estado.py`, `acoes.py`): alçada, aprovação, suspeita, cosmetovigilância, canal do time, trilha obrigatória | ✅ (`tests/test_acoes.py`) |
 | 2 | `politicas.py`: `coletar_fatos` + `avaliar(categoria)` → `Avaliacao` (situação, passos, alternativas, fatos, trilha) | ✅ (`tests/test_politicas.py`, D-007 a D-011) |
-| 3 | `veracidade.py`: sinais → `p_verdadeira` (+ grupo entre clientes novos) | ⏳ próximo |
-| 4 | `decisao.py`: LTV/LTV potencial, custo esperado, teto e freios para novos | ⬜ |
+| 3 | `veracidade.py`: sinais com LR calibrado → `p_verdadeira`; grupo por CPF/telefone/e-mail | ✅ (`tests/test_veracidade.py`, D-012 a D-014) |
+| 4 | `decisao.py`: LTV/LTV potencial, custo esperado, teto e freios para novos | ⏳ próximo |
 | 5 | `llm.py`: Jev (classificação) + `glm-5.3` (resposta), custo e 429 | ⬜ |
 | 6 | `agente.py`: priorização da fila, loop por ticket, **dossiê por ticket** | ⬜ |
 | 7 | Trilha de decisão completa: trilha em toda ação ✅; justificativa de LLM/Jev, dossiê e `docs/DECISOES.md` sempre atualizado | 🔄 contínuo |

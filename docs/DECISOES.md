@@ -5,6 +5,39 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-014 · Detecção de grupo: CPF, telefone ou e-mail sim; CEP sozinho não
+- **Contexto:** o CLAUDE.md pede para detectar grupos de clientes (sobretudo novos) com o mesmo endereço, telefone ou foto.
+- **Dados:** nenhum CPF, telefone ou e-mail é compartilhado entre clientes, mas **22 pares de clientes dividem CEP** por coincidência.
+- **Decisão:**
+  - `detectar_grupo` usa CPF, telefone e e-mail (LR 15). CEP fica de fora, porque daria 22 falsos positivos.
+  - Foto compartilhada já é coberta pelo `hash_perceptual`.
+  - A função lê o CRM direto (análise interna), mas devolve só o campo coincidente e o `customer_id`, nunca o valor.
+- **Consequência:** sem grupos no histórico. A função está pronta para os clientes que chegarem na semana.
+
+## D-013 · Sinais e pesos medidos nos dados
+- **Taxa-base:** 17 de 280 conversas com foto (6,1%) usaram foto que aparece em outro cliente → `PRIOR_FALSA = 0,07`.
+- **Calibração** (17 fotos reaproveitadas × 365 únicas):
+
+| Sinal | Nas reaproveitadas | Nas únicas | LR usado (com teto) |
+|---|---|---|---|
+| Hash igual ao de outro cliente | 17/17 | 0/365 | 40 |
+| EXIF antes da entrega | 11/17 | 0/365 | 30 |
+| Descrição genérica (não identifica o item) | 16/17 | 1/365 | 20 |
+
+- **Ajustes a partir dos dados:**
+  - Software de edição só aparece em fotos legítimas ("Editor de Fotos do Galaxy", "Fotos do iOS"). Fica com LR 1,2: o CLAUDE.md o cita como sinal, mas os dados não o sustentam.
+  - **Falha sistêmica** (LR 0,5, a favor do cliente) só conta quando a origem comum faz sentido para a categoria: impressora em personalização, lote em avaria. Item faltante é erro de separação, e lote ou máquina não o explicam.
+  - **Reincidência** conta só fotos de **outros pedidos**. As do mesmo pedido já entram no grupo "foto"; contá-las de novo seria contagem dupla.
+- **Resultado no histórico:** conversas com foto reaproveitada ficam com p_verdadeira mediana de 0,06 (máx. 0,41); as demais, 0,96. As duas "legítimas" com p < 0,5 (AT108490, AT111960) têm foto reaproveitada em conversa anterior do mesmo pedido, então estão corretas.
+
+## D-012 · Veracidade por razões de verossimilhança, com grupos de sinais correlacionados
+- **Decisão:** `p_verdadeira` parte da taxa-base e soma o log dos LRs de cada sinal. Dentro de um grupo (`foto`, `historico`, `contexto`), conta inteiro o sinal mais forte de cada lado (contra ou a favor) e os demais entram com peso 0,25. Cada `Sinal` traz uma evidência verificável (ids de anexo, datas, pedidos), pronta para a trilha e para `sinalizar_suspeita`.
+- **Descartado:**
+  - Somar todos os LRs ("naive Bayes"): a foto da internet traz três sinais juntos e derrubaria p a quase zero.
+  - Usar o LLM para estimar p: não é auditável.
+- **Fora de propósito:** tom da mensagem e segmento do cliente não são sinais (CLAUDE.md). Atraso e cobrança duplicada ignoram fotos: a prova está no rastreio e no gateway.
+- **Consequência:** evidência mista fica na zona de dúvida (ex.: AT109160, p = 0,59), e quem decide o que fazer com ela é o `decisao.py`.
+
 ## D-011 · Casos sem regra explícita vão para uma pessoa, não para um palpite
 - **Decisão:**
   - "Atraso" em pedido que a transportadora marca como entregue vira `escalar` para a logística (entrega contestada).
