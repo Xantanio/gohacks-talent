@@ -5,6 +5,23 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-017 · Decisão por custo esperado: fórmulas e escolhas de negócio
+- **Ordem:**
+  1. A política manda.
+  2. Dinheiro com prova nos sistemas (duplicidade no gateway, atraso no rastreio, arrependimento previsto no CDC) segue a política.
+  3. Só dinheiro **baseado em foto** (avaria, item faltante, personalização) passa por veracidade, freios de novo e custo.
+- **LTV:** o `parametros.md` diz "recompra 28%/ano (70% acima de R$ 1.500)", sem fórmula. Escolha: receita futura esperada = `receita_acumulada × r/(1−r)`, ou seja, o cliente repete o histórico com probabilidade r a cada ano (série geométrica). Fiel mediano (R$ 620) → LTV R$ 241; VIP (R$ 1.909, r = 70%) → R$ 4.454.
+- **Novo:** `ltv = max(histórico, ticket × RECOMPRA_ESPERADA_NOVO)`, com RECOMPRA_ESPERADA_NOVO = 2. Um novato bem atendido tende a virar recorrente (mediana de 3 pedidos).
+- **Custos:**
+  - executar = (1−p) × valor × 0,45;
+  - supervisor = R$ 6 + p × 10% × custo de negar (FRACAO_ESPERA = 0,10: o custo de até 24h de espera, escolha explícita);
+  - negar = p × (½ LTV + 0,30 × R$ 42). Aparece só nas alternativas da trilha: o agente **nunca nega por suspeita** (política).
+- **Regras que vêm antes do custo:**
+  - Sinal com LR ≥ 8 ou da lista "sempre sinalizar" (foto reaproveitada, etiqueta de outro pedido, identidade compartilhada, suspeita improcedente anterior) → `sinalizar_suspeita`.
+  - Cliente novo vai para `solicitar_aprovacao` (sem suspeita) se o valor passar de R$ 150, se já teve resolução automática ou se não há evidência positiva na foto.
+- **Supervisão pelo custo:** quando o custo manda levar à supervisão, com sinais contra → `sinalizar_suspeita` (há evidência verificável). Sem sinais → `solicitar_aprovacao` (sinalizar exige evidência, conforme a política).
+- **Hoje:** nenhum dos 24 tickets do Reclame Aqui chega ao cálculo de custo. Todos caem antes numa regra da política (pedir foto, status, em andamento, escalar). O cálculo passa a valer quando as fotos chegarem durante a semana.
+
 ## D-016 · Nunca pagar duas vezes pelo mesmo problema; aprovação também abaixo da alçada
 - **Contexto:** 6 tickets da fila (1 no Reclame Aqui: AT116524) já têm reenvio ou nova produção registrados para o mesmo pedido, abertos em contato anterior. A política mandava repor de novo.
 - **Decisão (política):** em avaria, item faltante e personalização, antes de olhar prazo e foto, `politicas.py` procura reposição do mesmo tipo para o pedido:
