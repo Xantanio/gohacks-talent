@@ -5,6 +5,24 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-025 · Análise prévia ao agente analista (item 8): o que os dados sustentam
+- **Proposta avaliada (usuário):** dois agentes.
+  - Atendente: resolve o ticket.
+  - Analista: cuida dos contatos repetidos. É chamado pelo atendente ao perceber um padrão, ou age sozinho: varre os dados e avisa com `notificar_clientes` (até 300 por dia) quem ainda não reclamou.
+- **Confirmado:**
+  - **Impressora PRN-02:** defeitos de personalização (borrado, torto, cortado, pixelado, letra faltando, cor errada) em pedidos impressos de **16 a 28/10**. Em 22 de outubro, 10 de 53 pedidos (19%) reclamaram de personalização. A preventiva é a mais antiga (22/09) e o cartucho foi trocado em 28/10.
+    - **Público do aviso:** 43 pedidos ainda sem reclamação de personalização, **41 com consentimento**. Confere com os "40 clientes" da proposta.
+    - Pedidos impressos depois de 28/10: sem dado suficiente (ainda em trânsito). Não avisar; monitorar.
+  - **Expressa Já no Nordeste:** 105 pedidos em trânsito atrasados, 45 reclamaram (19 no Reclame Aqui) e **60 ainda não**. O analista também pode abrir chamado (papel permitido).
+  - **Brinde do CD2** (separação de 12 a 25/10): 85 pedidos, 60 reclamaram e **25 ainda não**.
+  - Limite `notificar_clientes` = 300 por dia (catálogo). Como o histórico é amostra de 1 em 4, o volume real é cerca de 4 vezes maior e o analista precisa priorizar entre dias.
+- **Não confirmado / armadilhas:**
+  - **"Mesmo lote com vazamento":** não há incidente. Uma contagem ingênua aponta o LT2608-F (11 conversas sobre vazamento), mas o produto que vazou é outro item do pedido (body mist, vitamina D), não o esfoliante do lote. O lote de `pedidos.csv` é só o do produto principal. **Usar o lote por item (`itens_pedido.lote`) e o produto citado.**
+  - **"Reclamou" ≠ "teve contato":** dos 20 contatos de pedidos da PRN-02, 10 eram sobre atraso ou dúvida. Excluir do aviso só quem reclamou **do defeito em questão**.
+  - **"Chamado pelo atendente":** não há ferramenta de passagem no catálogo (`acionar_pessoa` não tem área "analista"). A passagem é **orquestração interna** entre os dois agentes, registrada na trilha, sem ferramenta inventada. A correção da causa vai para pessoas: `acionar_pessoa(produção | logística)`.
+  - **"Caso da Maria":** a fila do Reclame Aqui não tem ticket da PRN-02. O único é o AT116690 (e-mail). Para a demo no escopo Reclame Aqui, o padrão com tickets na fila é a **Expressa Já no Nordeste** (7 no Reclame Aqui). Para mostrar a PRN-02 é preciso incluir o e-mail.
+- **Requisitos para a implementação:** consentimento (`aceita_comunicacao_*`); aviso sem promessa fora da política ("se notar o defeito, responda com foto e resolvemos sem custo"); não avisar quem já foi avisado; janela do incidente definida pelas reclamações, não por uma data fixa; e o analista também saber concluir "não há incidente".
+
 ## D-024 · Brinde que consta nos itens do pedido é devido (correção de erro)
 - **Erro encontrado:** ao analisar repetições, o AT116614 apareceu no grupo "brinde faltando no CD2". A política tinha **negado publicamente** no Reclame Aqui com "brinde não era devido: R$ 119,70 abaixo do mínimo de R$ 129". Mas o brinde GBT-9001 **estava nos itens do pedido**: a empresa o vendeu e se comprometeu a enviar. O ERP aplicou a campanha pelo valor total (R$ 130,63 com frete). São 28 pedidos nessa situação.
 - **Decisão:** se a linha do brinde está em `itens_pedido`, o brinde é devido e segue o fluxo normal de item faltante (foto, prazo, reenvio). As regras da campanha (marca, período, mínimo) só são conferidas quando o pedido **não** tem a linha do brinde.
