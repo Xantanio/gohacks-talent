@@ -40,6 +40,11 @@ SLA_HORAS = {"whatsapp": POL["sla_primeira_resposta"]["whatsapp.minutos"] / 60,
              "email": float(POL["sla_primeira_resposta"]["email.horas"]),
              "reclame_aqui": float(POL["sla_primeira_resposta"]["reclame_aqui.horas"])}
 CUSTO_CANAL = {k.split(".")[0]: float(v) for k, v in POL["custo_por_conversa_rs"].items()}
+# Ações sem dinheiro e reversíveis: se o agente errar a categoria, o custo é baixo (D-020).
+ACOES_SEM_RISCO = {"informar_status", "solicitar_foto", "abrir_chamado_transportadora", "responder_duvida",
+                   "agradecer", "validar_cupom", "responder_cliente"}
+LIMIAR_CATEGORIA_CANDIDATA = 0.15
+TENTATIVAS_REDACAO = 2  # 1ª redação + 1 reescrita com o motivo da reprovação
 REPOSICAO_POR_CATEGORIA = {"erro_personalizacao": "reimprimir_personalizacao", "avaria_vazamento": "reenviar_produto",
                            "item_faltante": "reenviar_produto"}
 
@@ -157,6 +162,8 @@ class Resultado:
     motivos_retencao: list[str] = field(default_factory=list)
     validacao: llm.Validacao | None = None
     redacao: llm.Redacao | None = None
+    tentativas: list[str] = field(default_factory=list)   # motivos das redações reprovadas antes da final
+    confianca_baixa: str | None = None                    # análise do D-020 quando o Jev ficou em dúvida
     erro: str | None = None
 
 
@@ -189,11 +196,39 @@ def _faltando(passo: Passo) -> list[str]:
             or _placeholder(passo.params[p])] + [k for k, v in passo.params.items() if _placeholder(v)]
 
 
-def _motivos_para_reter(t: Ticket, d: Decisao | None) -> list[str]:
+def _kw_politica(c: llm.Classificacao, categoria: str, f) -> dict[str, Any]:
+    if categoria == "item_faltante" and (c.falta_brinde or 0) > 0.5 and f.pedido:
+        return {"sku_alvo": _sku_brinde(f.pedido, f.itens)}
+    return {}
+
+
+def confianca_baixa_sem_risco(amb: Ambiente, c: llm.Classificacao, f) -> tuple[bool, str]:
+    """Jev em dúvida: se TODAS as categorias prováveis levam só a ações sem risco, seguir é seguro (D-020).
+
+    Roda política + decisão para cada candidata (só leituras; nada é executado) e compara as ferramentas.
+    """
+    candidatas = [k for k, p in sorted(c.probabilidades.items(), key=lambda kv: -kv[1])
+                  if p >= LIMIAR_CATEGORIA_CANDIDATA][:3] or [c.categoria]
+    if "outros" in candidatas:
+        return False, "uma categoria provável está fora da política"
+    detalhes = []
+    for cat in candidatas:
+        av = avaliar(cat, f, **_kw_politica(c, cat, f))
+        d = decidir(amb, f, av, avaliar_veracidade(amb, f, cat))
+        ferramentas = {p.ferramenta for p in d.passos} | {p.ferramenta for alt in av.alternativas for p in alt}
+        arriscadas = ferramentas - ACOES_SEM_RISCO
+        detalhes.append(f"{cat} ({c.probabilidades.get(cat, 0):.2f}) -> {', '.join(sorted(ferramentas)) or 'nada'}")
+        if arriscadas or d.requer_humano or av.situacao == "escalar":
+            return False, (f"se a categoria certa for {cat}, a ação seria {', '.join(sorted(arriscadas)) or 'escalar'}"
+                           " (custo de errar alto)")
+    return True, "todas as categorias prováveis levam só a ações sem risco: " + " | ".join(detalhes)
+
+
+def _motivos_para_reter(t: Ticket, d: Decisao | None, confianca_liberada: bool = False) -> list[str]:
     c, m = t.classificacao, []
     if c is None or c.erro:
         m.append("classificação indisponível")
-    elif c.revisao_humana:
+    elif c.revisao_humana and not confianca_liberada:
         m.append(f"revisão da classificação ({c.motivo_revisao})")
     if c and (c.caso_sensivel or 0) > 0.5:
         m.append("caso sensível (saúde)")
@@ -218,16 +253,19 @@ def processar(amb: Ambiente, t: Ticket, redigir: Callable[[list[dict[str, str]]]
                                  trilha={"por_que": c.justificativa(), "origem": c.origem,
                                          "evidencias": [f"confiança {c.confianca:.2f}"]})
         f = coletar_fatos(amb, t.conversation_id, t.order_id)
-        kw: dict[str, Any] = {}
-        if c.categoria == "item_faltante" and (c.falta_brinde or 0) > 0.5 and f.pedido:
-            kw["sku_alvo"] = _sku_brinde(f.pedido, f.itens)
-        av = avaliar(c.categoria, f, **kw)
+        liberada, porque_liberada = False, None
+        if c.revisao_humana and (c.motivo_revisao or "").startswith("confiança"):
+            liberada, porque_liberada = confianca_baixa_sem_risco(amb, c, f)
+            r.confianca_baixa = porque_liberada
+        av = avaliar(c.categoria, f, **_kw_politica(c, c.categoria, f))
         d = decidir(amb, f, av, avaliar_veracidade(amb, f, c.categoria))
         r.decisao = d
-        r.motivos_retencao = _motivos_para_reter(t, d)
+        r.motivos_retencao = _motivos_para_reter(t, d, confianca_liberada=liberada)
         reter = bool(r.motivos_retencao)
         trilha = d.trilha()
         trilha["evidencias"] = [f"classificação: {c.justificativa()}"] + trilha["evidencias"]
+        if liberada:
+            trilha["evidencias"].insert(1, f"confiança baixa, seguiu automático: {porque_liberada}")
 
         mensagem_enviada = False
         passos_texto_livre: list[Passo] = []
@@ -287,19 +325,28 @@ def _responder_com_llm(amb: Ambiente, r: Resultado, d: Decisao, redigir, reter: 
     msgs = llm.montar_prompt_resposta(empresa=t.empresa, publica=publica, intencao=d.intencao_resposta,
                                       acoes=_acoes_para_prompt(r, d), fatos=fatos,
                                       mensagem_cliente=texto_cliente)
-    red = redigir(msgs)
-    r.redacao = red
     permitidas = {e["ferramenta"] for e in r.executados if e["ok"]} | {
         p.ferramenta for alt in d.avaliacao.alternativas for p in alt}
     if d.avaliacao.situacao == "em_andamento":  # pode citar a reposição que JÁ existe (D-016)
         permitidas.add(REPOSICAO_POR_CATEGORIA.get(d.categoria, ""))
     pendentes = {p.ferramenta for p in d.passos if any(_placeholder(v) for v in p.params.values())}
     valores = {d.avaliacao.valor_acao} if d.avaliacao.valor_acao else set()
-    r.validacao = llm.validar_resposta(red.texto, publica=publica, ferramentas_permitidas=permitidas,
-                                       ferramentas_pendentes=pendentes,
-                                       valores_permitidos=valores,
-                                       permite_cupom=d.categoria == "cupom_promocao",
-                                       transportadora=(pedido or {}).get("transportadora"))
+    for tentativa in range(1, TENTATIVAS_REDACAO + 1):
+        red = redigir(msgs)
+        r.redacao = red
+        r.validacao = llm.validar_resposta(red.texto, publica=publica, ferramentas_permitidas=permitidas,
+                                           ferramentas_pendentes=pendentes,
+                                           valores_permitidos=valores,
+                                           permite_cupom=d.categoria == "cupom_promocao",
+                                           transportadora=(pedido or {}).get("transportadora"))
+        if red.erro or r.validacao.ok or tentativa == TENTATIVAS_REDACAO:
+            break
+        # Autocorreção (D-020): o modelo reescreve sabendo exatamente o que foi reprovado.
+        r.tentativas.append("; ".join(r.validacao.motivos))
+        msgs = msgs + [{"role": "assistant", "content": red.texto or ""},
+                       {"role": "user", "content": "Seu texto foi reprovado pela revisão automática por: "
+                        + "; ".join(r.validacao.motivos) + ". Reescreva corrigindo isso e mantendo as demais regras. "
+                        "Responda só com o JSON."}]
     if red.erro:
         r.motivos_retencao.append(f"redação falhou ({red.erro})")
     elif not r.validacao.ok:
@@ -375,6 +422,8 @@ def dossie(r: Resultado, amb: Ambiente) -> str:
                  f"preferência {c.preferencia or '-'}")
     else:
         L.append("- sem classificação")
+    if r.confianca_baixa:
+        L.append(f"- confiança baixa → {r.confianca_baixa}")
     if d:
         av, v = d.avaliacao, d.veracidade
         L += ["", "## 3. Fatos levantados nos sistemas", ""] + [f"- {filtro(x)}" for x in av.fatos]
@@ -400,6 +449,8 @@ def dossie(r: Resultado, amb: Ambiente) -> str:
     L += ["", "## 8. Resposta ao cliente", ""]
     if r.resposta:
         L.append(f"- origem: {r.resposta_origem} · {'publicada' if r.publicada else 'NÃO publicada (rascunho)'}")
+        for i, motivo in enumerate(r.tentativas, 1):
+            L.append(f"- tentativa {i} reprovada e reescrita automaticamente: {motivo}")
         if r.validacao:
             L.append(f"- validador: {'aprovado' if r.validacao.ok else 'reprovado: ' + '; '.join(r.validacao.motivos)}")
         if r.redacao and r.redacao.justificativa:

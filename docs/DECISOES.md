@@ -5,6 +5,15 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-020 · Automação total quando errar é barato (decisão do usuário)
+- **Contexto:** na execução real, 4 dos 5 tickets retidos eram dúvida do Jev entre "atraso" e "onde está o pedido". Nas duas categorias a ação é a mesma (informar status). Reter só gerava fila humana. O usuário pediu: "quando o custo de errar não é tão alto, seguir com a automação total; o que for possível automatizar, automatizar".
+- **Decisão 1 (confiança baixa):** com confiança < 0,7, o agente roda política e decisão para cada categoria provável (probabilidade ≥ 15%, até 3). São só leituras; nada é executado nesse teste.
+  - Se **todas** levam só a ações sem dinheiro e reversíveis (`informar_status`, `solicitar_foto`, `abrir_chamado_transportadora`, `responder_duvida`, `agradecer`, `validar_cupom`, `responder_cliente`), segue com a mais provável. O porquê vai para a trilha de cada ação e para o dossiê.
+  - Se alguma levaria a dinheiro, negativa ou escalação → pessoa. Exemplo testado: dúvida entre "onde está" e "arrependimento" (que seria reembolso).
+- **Decisão 2 (autocorreção):** texto reprovado pelo validador volta ao glm com o motivo exato e é reescrito uma vez. Só uma segunda reprovação leva a uma pessoa.
+- **Continua com humano** (errar é caro): caso de saúde, ameaça jurídica, suspeita de fraude, dinheiro acima da alçada e freios de cliente novo.
+- **Resultado real (Reclame Aqui):** de 19 → **23 de 24 respondidos automaticamente**. O único retido é a reação adversa (AT116568). Custo da execução: US$ 0,0012 no Jev e cerca de 4,4 mil tokens de chat.
+
 ## D-019 · Loop do agente: quem escreve a resposta, quando reter, como priorizar
 - **Fluxo por execução:** classificar todos os tickets dos `canais` (Jev) → priorizar → para cada ticket: `classificar_conversa` → fatos → política → veracidade → decisão → executar passos → responder ou reter → dossiê.
 - **Quem escreve:** ferramenta de mensagem escolhida pela decisão (`solicitar_foto`, `informar_status`, `negar_por_politica`, `orientar_suspensao_uso`, `agradecer`) → vale o texto fixo dela. Ele é seguro, já mascarado e deixa estado (ex.: "aguardando foto"). O LLM escreve só quando a decisão pede texto livre ou quando nenhuma mensagem saiu (reenvio executado, aprovação pedida, escalação).

@@ -139,7 +139,8 @@ A implementar junto com `llm.py` / `agente.py`:
    - texto coerente com a ação decidida (não prometer reenvio/reembolso que o código não executou; não citar valores/prazos fora da política);
    - sem acusação/termos de fraude; sem número de pedido completo na resposta pública;
    - reprovou → não publica; vai para revisão (`acionar_pessoa`) com o motivo na trilha.
-4. **Humano antes de publicar no Reclame Aqui** quando: caso sensível (reação adversa, menção a Procon/jurídico), suspeita sinalizada, `confidence` do Jev < 0,7, ou validador reprovou. Fora disso, publica sozinho.
+4. **Humano antes de publicar no Reclame Aqui** quando: caso sensível (reação adversa, menção a Procon/jurídico), suspeita sinalizada, `confidence` do Jev < 0,7 **e** alguma categoria provável levaria a ação com risco (dinheiro, negativa, escalação), ou validador reprovou **duas vezes** (a 1ª reprovação é reescrita automaticamente). Fora disso, publica sozinho.
+   - **Princípio do usuário: automatizar tudo o que for possível; pessoa só onde errar é caro** (D-020).
 5. **Falha segura:** erro de rede, 429, timeout ou JSON inválido do LLM/Jev → o ticket não recebe ação de dinheiro; fica em `escalar` com o erro na trilha. Nunca "chutar" uma categoria.
 6. **Segredos:** token só no `.env` (já no `.gitignore`); nunca em log, trilha, dossiê ou print.
 7. **Custos e limites:** registrar uso de toda chamada (ver AI Proxy) e respeitar 429 com espera.

@@ -110,6 +110,64 @@ def test_dossie_e_exportacao(execucao):
     assert (pasta / "canal_do_time.md").read_text(encoding="utf-8").count("[") > 0
 
 
+# ---- D-020: automação quando errar é barato --------------------------------------
+
+def processar_um(cid, classificacao, redigir=redator_falso):
+    amb = Ambiente()
+    t = next(t for t in A.carregar_tickets(amb, ["reclame_aqui"]) if t.conversation_id == cid)
+    t.classificacao = classificacao
+    A.priorizar(amb, [t])
+    return A.processar(amb, t, redigir)
+
+
+def duvida(cats: dict[str, float]) -> llm.Classificacao:
+    top = max(cats, key=cats.get)
+    return llm.Classificacao(top, cats[top], cats, revisao_humana=True,
+                             motivo_revisao=f"confiança {cats[top]:.2f} < 0.7", origem="teste")
+
+
+def test_confianca_baixa_sem_risco_segue_automatico():
+    # AT116521 ao vivo: Jev em dúvida entre "onde está" e "atraso"; as duas levam só a informar status
+    amb = Ambiente()
+    t = next(t for t in A.carregar_tickets(amb, ["reclame_aqui"]) if t.conversation_id == "AT116521")
+    t.classificacao = duvida({"onde_esta_pedido": 0.62, "atraso_entrega": 0.36})
+    A.priorizar(amb, [t])
+    r = A.processar(amb, t, redator_falso)
+    assert r.publicada and not r.motivos_retencao
+    assert "sem risco" in r.confianca_baixa
+    # a ação executada carrega na trilha o porquê de ter seguido sem humano
+    acoes = [a for a in amb.estado.acoes if a["conversation_id"] == "AT116521" and a["acao"] != "classificar_conversa"]
+    assert acoes and all(any("seguiu automático" in e for e in a["trilha"]["evidencias"]) for a in acoes)
+
+
+def test_confianca_baixa_com_dinheiro_vai_para_pessoa():
+    # se a categoria certa for arrependimento, a ação seria reembolso: errar é caro
+    r = processar_um("AT116520", duvida({"onde_esta_pedido": 0.55, "arrependimento_cancelamento": 0.40}))
+    assert not r.publicada and any("confiança" in m for m in r.motivos_retencao)
+    assert "custo de errar alto" in r.confianca_baixa
+
+
+def test_texto_reprovado_e_reescrito_automaticamente():
+    textos = iter(["Como compensação, enviamos um cupom de 10%.",                     # reprovado
+                   "Sentimos muito! Já registramos seu caso e seguimos acompanhando."])  # aprovado
+
+    def redator(msgs):
+        if len(msgs) > 2:  # 2ª chamada recebe o motivo da reprovação
+            assert "compensação" in msgs[-1]["content"]
+        return llm.Redacao(texto=next(textos), justificativa="teste", modelo="falso")
+
+    r = processar_um("AT116524", llm.Classificacao("erro_personalizacao", 0.95, {"erro_personalizacao": 0.95},
+                                                   origem="teste"), redigir=redator)
+    assert r.publicada and len(r.tentativas) == 1 and "compensação" in r.tentativas[0]
+
+
+def test_texto_reprovado_duas_vezes_vai_para_pessoa():
+    ruim = lambda msgs: llm.Redacao(texto="Ganhe um cupom de desconto!", modelo="falso")  # noqa: E731
+    r = processar_um("AT116524", llm.Classificacao("erro_personalizacao", 0.95, {"erro_personalizacao": 0.95},
+                                                   origem="teste"), redigir=ruim)
+    assert not r.publicada and any("validador" in m for m in r.motivos_retencao)
+
+
 def test_sem_ia_tudo_vai_para_revisao(tmp_path):
     resultados, _ = A.rodar(["reclame_aqui"], limite=3, usar_ia=False, pasta_saida=tmp_path)
     assert all(not r.publicada and r.motivos_retencao for r in resultados)
