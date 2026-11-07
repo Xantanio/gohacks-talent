@@ -8,7 +8,7 @@ Princípio (CLAUDE.md, Guardrails): **a IA não escolhe ferramentas nem decide d
 
 | Etapa | Modelo | Endpoint | Versão do prompt | Parâmetros | Saída | Quem decide com ela |
 |---|---|---|---|---|---|---|
-| 1. Classificação | Jev (`jev-latest`) | `POST /v1/systemone` | `classif-v1` | perguntas tipadas (choice/score/noul) | categoria + confiança + sinais | código: confiança < 0.7 → análise de risco (D-020) |
+| 1. Classificação | Jev (`jev-latest`) | `POST /v1/systemone` | `classif-v2` | perguntas tipadas (choice/score/noul) | categoria + confiança + sinais | código: confiança < 0.7 → análise de risco (D-020) |
 | 2. Redação | `glm-5.3` | `POST /v1/chat/completions` | `resposta-v2` | max_tokens 4000, reasoning_effort `minimal` | JSON `{resposta, justificativa}` | validador + juiz |
 | 3. Validação determinística | — (código) | — | — | regras abaixo | aprovado / motivos | código |
 | 4. Juiz | `gpt-6-astra` | `POST /v1/chat/completions` | `juiz-v2` | max_tokens 2000 | JSON com notas 1–5 e justificativas | código: mínimos por critério |
@@ -25,7 +25,7 @@ Exemplo usado abaixo: ticket real **AT116524** (Reclame Aqui, erro_personalizaca
 
 ---
 
-## 1. Classificação — Jev (`classif-v1`)
+## 1. Classificação — Jev (`classif-v2`)
 
 O Jev não recebe um prompt de texto: recebe um **estado** e **perguntas tipadas**. Conversa sem mensagem do cliente vira `sem_interacao` por regra, sem chamada.
 
@@ -93,6 +93,10 @@ O Jev não recebe um prompt de texto: recebe um **estado** e **perguntas tipadas
       "reenvio": "quer receber o produto",
       "nao_disse": "não diz"
     }
+  },
+  "multiplos_assuntos": {
+    "type": "noul",
+    "instructions": "A mensagem traz mais de um problema DIFERENTE (ex.: atraso e cobrança duplicada)? Repetir o mesmo problema não conta."
   }
 }
 ```

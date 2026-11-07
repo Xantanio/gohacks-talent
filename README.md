@@ -52,7 +52,7 @@ Cada execução grava em `saida/<data-hora>/`: `resumo.md`, um dossiê por ticke
 `semana.md`, as planilhas dos "sistemas" (ações, mensagens, reenvios, estornos, chamados, aprovações, pendências,
 avisos, validações) e o registro completo de chamadas (`log_chamadas.jsonl`).
 
-**Testes:** são 149 e rodam em cerca de 30 s, sem chamar a IA.
+**Testes:** são 167 e rodam em cerca de 30 s, sem chamar a IA. Os testes de ataque contra a IA (tentativas de manipular o agente pela mensagem do cliente) rodam ao vivo com `RODAR_IA=1`.
 
 ```powershell
 .\venv\Scripts\python.exe -m pytest -q
@@ -110,7 +110,7 @@ ticket ─► classificar (IA: Jev) ─► investigar (ferramentas de leitura) �
 ## Documentação
 
 - [`CLAUDE.md`](CLAUDE.md): regras do desafio, arquitetura, proteções e agenda de desenvolvimento.
-- [`docs/DECISOES.md`](docs/DECISOES.md): **29 decisões de projeto**, cada uma com contexto, decisão, alternativas descartadas e o que os dados mostraram.
+- [`docs/DECISOES.md`](docs/DECISOES.md): **30 decisões de projeto**, cada uma com contexto, decisão, alternativas descartadas e o que os dados mostraram.
 - [`docs/PROMPTS.md`](docs/PROMPTS.md): os prompts de todos os agentes, gerados a partir do código, com exemplo real e lista de verificação.
 
 ## Limitações conhecidas

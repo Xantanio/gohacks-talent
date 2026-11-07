@@ -31,7 +31,7 @@ import pandas as pd
 from . import dados, llm
 from .decisao import Decisao, decidir, valor_do_cliente
 from .ferramentas import CATALOGO, Ambiente, mascarar_pii, mascarar_publico, pedido_na_posicao
-from .politicas import CAMPANHA, POL, Passo, avaliar, coletar_fatos, texto_regra
+from .politicas import CAMPANHA, CATEGORIAS, POL, Passo, avaliar, coletar_fatos, texto_regra
 from .veracidade import avaliar_veracidade
 
 FERRAMENTAS_DE_MENSAGEM = {"solicitar_foto", "informar_status", "negar_por_politica", "orientar_suspensao_uso",
@@ -359,6 +359,22 @@ def processar(amb: Ambiente, t: Ticket, redigir: Callable[[list[dict[str, str]]]
 
         if d.categoria == "reacao_adversa":
             _abrir_pendencia_cosmetovigilancia(amb, t, f)
+        segunda = c.segunda_categoria
+        if segunda and segunda in CATEGORIAS:  # o 2º problema da mesma mensagem não pode se perder (D-030)
+            from . import linguagem
+            res = amb.acionar_pessoa(
+                area="supervisão", urgencia="media",
+                assunto=f"Segundo assunto na mesma mensagem — {t.conversation_id}",
+                contexto=(f"O agente tratou '{linguagem.categoria(c.categoria)}'. A mensagem também traz "
+                          f"'{linguagem.categoria(segunda)}' (probabilidade {c.probabilidades.get(segunda, 0):.2f}), "
+                          "que precisa ser atendido."),
+                trilha={"por_que": "mensagem com mais de um problema; o agente trata um por vez",
+                        "evidencias": [c.justificativa(), f"mais de um assunto: {c.multiplos_assuntos:.2f}"],
+                        "origem": "jev + regra"})
+            r.executados.append({"ferramenta": "acionar_pessoa", "ok": res.get("ok"), "erro": res.get("erro"),
+                                 "acao_id": res.get("acao_id"), "texto": None,
+                                 "params": {"area": "supervisão", "assunto": f"segundo assunto: {segunda}"}})
+            r.pendentes.append(f"segundo assunto ({segunda}) encaminhado à supervisão")
         if com_analista:
             _chamar_analista(amb, r)
         if mensagem_enviada and not passos_texto_livre:

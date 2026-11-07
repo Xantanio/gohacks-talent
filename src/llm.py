@@ -33,9 +33,10 @@ MODELO_TEXTO = "glm-5.3"
 # Juiz de outra família (GPT x GLM): o modelo não corrige o próprio texto. Versão fixa para o critério não mudar (D-022).
 MODELO_JUIZ = "gpt-6-astra"
 VERSAO_PROMPT_JUIZ = "juiz-v2"
-VERSAO_PROMPT_CLASSIFICACAO = "classif-v1"
+VERSAO_PROMPT_CLASSIFICACAO = "classif-v2"   # v2: pergunta "mais de um problema?" (D-030)
 VERSAO_PROMPT_RESPOSTA = "resposta-v2"
 LIMIAR_CONFIANCA = 0.7
+LIMIAR_SEGUNDA_CATEGORIA = 0.15
 MAX_TOKENS_RESPOSTA = 4000
 ESFORCO_RACIOCINIO = "minimal"
 TIMEOUT_S = 90
@@ -174,6 +175,7 @@ class Classificacao:
     caso_sensivel: float | None = None    # P(saúde/reação adversa)
     falta_brinde: float | None = None     # P(a falta é do brinde da promoção)
     preferencia: str | None = None        # reembolso | reenvio | nao_disse
+    multiplos_assuntos: float | None = None  # P(a mensagem traz mais de um problema diferente)
     revisao_humana: bool = False
     motivo_revisao: str | None = None
     origem: str = "jev"
@@ -186,6 +188,15 @@ class Classificacao:
         if self.categoria is None:
             return None
         return "Outros" if self.categoria == "outros" else tag_da_categoria(self.categoria)
+
+    @property
+    def segunda_categoria(self) -> str | None:
+        """Outro assunto da mesma mensagem: só se o Jev disser que há mais de um problema e a 2ª categoria for relevante."""
+        if (self.multiplos_assuntos or 0) <= 0.5:
+            return None
+        outras = sorted(((k, v) for k, v in self.probabilidades.items() if k not in (self.categoria, "outros")),
+                        key=lambda kv: -kv[1])
+        return outras[0][0] if outras and outras[0][1] >= LIMIAR_SEGUNDA_CATEGORIA else None
 
     def justificativa(self) -> str:
         if self.erro:
@@ -227,6 +238,9 @@ PERGUNTAS_JEV: dict[str, Any] = {
     "preferencia": {"type": "choice", "instructions": "Se o pedido não chegar ou der problema, o que o cliente diz preferir?",
                     "criteria": {"reembolso": "quer o dinheiro de volta", "reenvio": "quer receber o produto",
                                  "nao_disse": "não diz"}},
+    "multiplos_assuntos": {"type": "noul",
+                           "instructions": "A mensagem traz mais de um problema DIFERENTE (ex.: atraso e cobrança "
+                                           "duplicada)? Repetir o mesmo problema não conta."},
 }
 
 
@@ -251,7 +265,7 @@ def classificar(conversa: dict[str, Any], pedido: dict[str, Any] | None = None) 
             urgencia=a["urgencia"].get("score"), irritacao=a["irritacao"].get("score"),
             ameaca_externa=a["ameaca_externa"].get("noul"), caso_sensivel=a["caso_sensivel"].get("noul"),
             falta_brinde=a["falta_brinde"].get("noul"), preferencia=a["preferencia"].get("choice"),
-            modelo=resp.get("model"))
+            multiplos_assuntos=(a.get("multiplos_assuntos") or {}).get("noul"), modelo=resp.get("model"))
     except (ErroIA, KeyError, TypeError, ValueError) as e:
         return Classificacao(None, revisao_humana=True, motivo_revisao="falha na classificação", erro=str(e)[:200])
     if c.confianca < LIMIAR_CONFIANCA:
