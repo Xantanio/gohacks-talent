@@ -118,8 +118,8 @@ Objetivo: quem audita ou assume o projeto entende **o que foi decidido e por qu�
 |---|---|---|
 | 0 | `dados.py` + ferramentas de leitura (relógio, PII, validação do catálogo) | ✅ |
 | 1 | Ferramentas de ação (`estado.py`, `acoes.py`): alçada, aprovação, suspeita, cosmetovigilância, canal do time, trilha obrigatória | ✅ (`tests/test_acoes.py`) |
-| 2 | `politicas.py`: elegibilidade por caso (prazos, foto, separação, atraso em dias úteis, reação adversa) | ⏳ próximo |
-| 3 | `veracidade.py`: sinais → `p_verdadeira` (+ grupo entre clientes novos) | ⬜ |
+| 2 | `politicas.py`: `coletar_fatos` + `avaliar(categoria)` → `Avaliacao` (situação, passos, alternativas, fatos, trilha) | ✅ (`tests/test_politicas.py`, D-007 a D-011) |
+| 3 | `veracidade.py`: sinais → `p_verdadeira` (+ grupo entre clientes novos) | ⏳ próximo |
 | 4 | `decisao.py`: LTV/LTV potencial, custo esperado, teto e freios para novos | ⬜ |
 | 5 | `llm.py`: Jev (classificação) + `glm-5.3` (resposta), custo e 429 | ⬜ |
 | 6 | `agente.py`: priorização da fila, loop por ticket, **dossiê por ticket** | ⬜ |
@@ -139,7 +139,7 @@ src/
   ferramentas.py   # catálogo, Ambiente (papel/ator/trilha), ferramentas de leitura
   acoes.py         # ferramentas de ação: só as travas do catálogo (alçada, separação, 1 troca...), não a política
   estado.py        # estado mutável da semana (ações, mensagens, aprovações, suspeitas, Slack) + exportar()
-  politicas.py     # regras e alçadas a partir de politicas.csv
+  politicas.py     # avaliar(categoria, fatos) -> Avaliacao; avalia e sugere passos, não executa (D-007)
   veracidade.py    # sinais de fraude → p_verdadeira (+ detecção de grupo entre clientes novos)
   decisao.py       # custo esperado (LTV real ou potencial p/ novos), teto e limite de 1 auto p/ novos
   llm.py           # cliente do AI Proxy (Jev + chat) com registro de custo

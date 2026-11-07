@@ -5,6 +5,43 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-011 · Casos sem regra explícita vão para uma pessoa, não para um palpite
+- **Decisão:**
+  - "Atraso" em pedido que a transportadora marca como entregue vira `escalar` para a logística (entrega contestada).
+  - Pagamento confirmado no gateway mas pendente no ERP vira `escalar` para a supervisão.
+  - Prazo vencido com pedido ainda não separado vira `escalar` para a logística.
+- **Consequência:** a política nunca inventa uma saída que `politicas.csv` não prevê. Quando a regra não cobre o caso, o agente levanta a mão.
+
+## D-010 · Reação adversa é sempre escalada; urgência crítica a partir de 75% do prazo
+- **Contexto:** o atendente pode orientar a suspensão do uso, mas `registrar_cosmetovigilancia` é exclusiva do supervisor e tem prazo de 24h desde o relato.
+- **Decisão:** a situação é sempre `escalar`, com os passos `orientar_suspensao_uso` → `acionar_pessoa(supervisão)`. A mão levantada já traz sku, lote e fotos para o registro. A urgência fica `critica` a partir de 18h (75% de 24h). `trocar_produto` aparece só como passo opcional.
+- **Consequência:** a troca nunca substitui o registro.
+
+## D-009 · Valor de referência e validade das fotos
+- **Decisão:**
+  - Reenvio ou reimpressão do pedido inteiro usa `valor_produtos` (sem frete).
+  - Reembolso por atraso ou arrependimento usa `valor` (o que o cliente pagou).
+  - Item específico usa o `valor_total` da linha em `itens_pedido`.
+  - Brinde (preço zero) usa o `custo_unitario` do produto (R$ 24,90).
+  - Só valem fotos enviadas **depois** da entrega.
+- **Consequência:** a alçada é comparada com o custo real da ação. Uma foto de antes da entrega não pode provar uma avaria.
+
+## D-008 · Prazo "do recebimento" conta até o PRIMEIRO contato sobre o pedido
+- **Contexto:** muitos clientes já reclamaram antes ("Pela 2ª vez...") e não tiveram resposta.
+- **Decisão:** os dias desde a entrega são contados até o primeiro contato do cliente sobre aquele pedido, em qualquer conversa (histórico ou fila), e não até o "agora".
+- **Descartado:** contar até o momento do atendimento. Isso puniria o cliente pela demora da própria empresa.
+- **Consequência:** a trilha mostra a data da entrega e a do primeiro relato. Exemplo: AT116524 conta a partir de 29/10 (AT116157), não de 31/10.
+
+## D-007 · `politicas.py` avalia e sugere; não executa
+- **Decisão:** `avaliar(categoria, fatos)` devolve uma `Avaliacao` com:
+  - `situacao`: `elegivel`, `nao_elegivel`, `falta_informacao` ou `escalar`;
+  - `passos`: ferramentas e parâmetros, já com `solicitar_aprovacao` quando o valor passa da alçada;
+  - `alternativas`: por exemplo, reenvio ou reembolso, à escolha do cliente;
+  - `fatos`, `pendencias` e `trilha()`.
+  `coletar_fatos` usa só as ferramentas de leitura, então tudo fica no log.
+- **Números:** vêm de `politicas.csv`. Os três limites que só existem no texto da regra (rastreio parado há 3 dias úteis, Pix em 30 minutos, boleto em 2 dias úteis) são extraídos por regex. Se o texto mudar, o import falha de propósito.
+- **Consequência:** a política é testável sem LLM e sem efeito colateral. O `decisao.py` combina a `Avaliacao` com a veracidade e o custo esperado antes de executar.
+
 ## D-006 · Trilha estruturada no lugar do "chain of thought" do modelo
 - **Contexto:** precisamos que um auditor (ou quem assumir o projeto) entenda por que cada ação foi tomada.
 - **Decisão:** toda ferramenta que altera estado exige `trilha={"por_que": ...}` e é recusada sem ela. A trilha aceita `regra`, `evidencias`, `alternativas` (com custo esperado), `p_verdadeira`, `custo_esperado` e `origem`. O raciocínio oculto do modelo (`reasoning_content`) não é usado.
