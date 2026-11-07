@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Saída das execuções do agente
+saida/
+
+# Dados do evento (contêm CPF/telefone/cartão sintéticos; não publicar)
+data/
