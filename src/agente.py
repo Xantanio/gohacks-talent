@@ -486,7 +486,8 @@ def _levantar_mao(amb: Ambiente, r: Resultado, rascunho: str | None) -> None:
                              contexto=contexto, urgencia="alta" if urgente else "media",
                              trilha={"por_que": "Guardrail: revisão humana antes de publicar",
                                      "evidencias": r.motivos_retencao, "origem": "regra"})
-    r.executados.append({"ferramenta": "acionar_pessoa", "params": {"area": "supervisão"}, "ok": res.get("ok"),
+    r.executados.append({"ferramenta": "acionar_pessoa", "ok": res.get("ok"),
+                         "params": {"area": "supervisão", "assunto": "revisar a resposta antes de publicar"},
                          "erro": res.get("erro"), "acao_id": res.get("acao_id"), "texto": None})
     # pendência de publicação: o supervisor libera (com ou sem edição) ou descarta; o atendente publica (D-027)
     amb.estado.abrir_pendencia(
@@ -514,12 +515,101 @@ def _fmt(v: Any) -> str:
     return "-" if v is None else f"{v:.2f}" if isinstance(v, float) else str(v)
 
 
+_SIMPLES = {"validador reprovou": "a revisão automática encontrou um problema",
+            "juiz reprovou": "o revisor de qualidade pediu ajustes",
+            "revisão da classificação": "dúvida sobre o assunto do pedido",
+            "que o sistema não decidiu": "que ninguém aprovou",
+            "retido para revisão humana": "aguardando uma pessoa liberar o envio",
+            "registrar_cosmetovigilancia": "registrar a reação adversa (cosmetovigilância)"}
+
+
+def _simples(texto: str | None) -> str:
+    from . import linguagem
+    texto = linguagem.humanizar(texto)
+    for a, b in _SIMPLES.items():
+        texto = texto.replace(a, b)
+    return texto
+
+
+def dossie_simples(r: Resultado, amb: Ambiente) -> str:
+    """Resumo para pessoas (D-029): linguagem comum, sem termos técnicos, com a fonte de cada informação."""
+    from . import linguagem as lg
+    t, d, c = r.ticket, r.decisao, r.ticket.classificacao
+    filtro = mascarar_publico if t.canal == "reclame_aqui" else mascarar_pii
+    pend = [p for p in amb.estado.pendencias if p["conversation_id"] == t.conversation_id]
+    abertas = [p for p in pend if p["status"] == "aberta"]
+    situacao = ("Respondido" if r.publicada else "Aguardando uma pessoa" if abertas or r.motivos_retencao
+                else "Sem resposta")
+    L = [f"# {t.conversation_id} · {t.empresa} · {lg.CANAL.get(t.canal, t.canal)}", "",
+         f"**Assunto:** {lg.categoria(c.categoria if c else None)} · **Situação:** {situacao}", "",
+         "## Em poucas palavras", "", _simples(d.resumo if d else (r.erro or "Não foi possível classificar o pedido.")),
+         "", "## O que o cliente escreveu", ""]
+    conversa = amb.ler_conversa(t.conversation_id)
+    L += [f"> {filtro(m['texto'] or '')}" for m in conversa["mensagens"] if m["autor"] == "cliente"] or ["> (sem mensagem)"]
+
+    L += ["", "## O que o agente fez", ""]
+    feitas = [e for e in r.executados if e["ok"] and e["ferramenta"] != "classificar_conversa"]
+    for e in feitas:
+        extra = ""
+        if e["ferramenta"] == "acionar_pessoa":
+            area = lg.AREA.get(e["params"].get("area"), e["params"].get("area"))
+            extra = f" ({area})" + (f": {_simples(e['params']['assunto'])}" if e["params"].get("assunto") else "")
+        L.append(f"- {lg.acao(e['ferramenta']).capitalize()}{extra} <sub>registro {e.get('acao_id') or '-'}</sub>")
+    if not feitas:
+        L.append("- Nenhuma ação ainda.")
+    for p in r.pendentes:
+        L.append(f"- Ficou para depois: {_simples(p)}")
+    for p in r.padroes:
+        L.append(f"- Percebeu um problema que se repete e chamou o analista: {_simples(p)}")
+
+    L += ["", "## Por quê", ""]
+    if d:
+        L.append(f"- **Regra aplicada:** {_simples(texto_regra(d.categoria)) or _simples(d.resumo)} "
+                 f"<sub>fonte: regra “{lg.categoria(d.categoria)}”, politicas.csv</sub>")
+        for f in d.avaliacao.fatos[:3]:
+            L.append(f"- {_simples(filtro(f))} <sub>fonte: sistemas de pedidos</sub>")
+        v = d.veracidade
+        if v and v.aplicavel:
+            L.append(f"- Chance estimada de a reclamação ser verdadeira: **{v.p_verdadeira:.0%}**"
+                     + (" — pontos de atenção: " + "; ".join(_simples(s.evidencia) for s in v.contra[:2]) if v.contra else ""))
+        if d.cliente:
+            L.append(f"- Cliente **{d.cliente.segmento}**, valor futuro estimado de R$ {d.cliente.ltv:.0f}.")
+    if r.confianca_baixa:
+        L.append("- O assunto não estava 100% claro, mas as possibilidades levavam à mesma ação, sem risco.")
+
+    if abertas:
+        L += ["", "## Esperando uma pessoa", ""]
+        for p in abertas:
+            prazo = f" · prazo {pd.Timestamp(p['prazo']):%d/%m %H:%M}" if p["prazo"] else ""
+            L.append(f"- **{lg.PENDENCIA.get(p['tipo'], p['tipo'])}**{prazo} <sub>{p['pendencia_id']}</sub>")
+
+    L += ["", "## Resposta ao cliente", ""]
+    if r.resposta:
+        L.append("Publicada." if r.publicada else "Rascunho **não publicado**: aguarda revisão de uma pessoa.")
+        if r.motivos_retencao and not r.publicada:
+            L.append("Motivo: " + "; ".join(_simples(m) for m in r.motivos_retencao) + ".")
+        if r.tentativas:
+            L.append(f"\nO texto foi revisado automaticamente e reescrito {len(r.tentativas)} vez(es). Ajustes pedidos:")
+            ajustes = (r.julgamento.problemas if r.julgamento and r.julgamento.problemas else []) or r.tentativas
+            L += [f"- {_simples(a)}" for a in ajustes[:4]]
+        L += ["", f"> {filtro(r.resposta)}"]
+    else:
+        L.append("Nenhuma resposta enviada." + (" Motivo: " + "; ".join(_simples(m) for m in r.motivos_retencao)
+                                                 if r.motivos_retencao else ""))
+    return "\n".join(L) + "\n"
+
+
 def dossie(r: Resultado, amb: Ambiente) -> str:
-    """Markdown legível por quem audita ou assume o projeto: o que leu, como decidiu, o que fez e por quê."""
+    """Arquivo do dossiê: resumo para pessoas + detalhes técnicos para auditoria."""
+    return dossie_simples(r, amb) + "\n---\n\n" + dossie_tecnico(r, amb)
+
+
+def dossie_tecnico(r: Resultado, amb: Ambiente) -> str:
+    """Detalhes para quem audita ou assume o projeto: o que leu, como decidiu, o que fez e por quê, com os nomes exatos."""
     t, d, c = r.ticket, r.decisao, r.ticket.classificacao
     filtro = mascarar_publico if t.canal == "reclame_aqui" else mascarar_pii
     conversa = amb.ler_conversa(t.conversation_id)
-    L = [f"# Dossiê {t.conversation_id} — {t.empresa} ({t.canal})", "",
+    L = [f"# Detalhes técnicos (auditoria) — {t.conversation_id}", "",
          f"- **Status na fila:** {t.status} · **SLA:** {t.horas_restantes:+.1f} h restantes "
          f"(referência {t.referencia_sla:%d/%m %H:%M}) · **Prioridade:** {t.prioridade} "
          f"({', '.join(f'{k} {v}' for k, v in t.componentes.items())})",

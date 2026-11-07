@@ -163,7 +163,10 @@ def _postar_no_canal(amb: Ambiente, tipo: str, titulo: str, linhas: dict[str, An
     texto = (f"{emoji} *[{tipo}]* para *{area}* · urgência *{urgencia}*\n*{mascarar_pii(titulo)}*\n{corpo}\n"
              f"_por {amb.ator} ({amb.papel}) em {amb.estado.agora_txt()} · tique {amb.tique}_")
     item = {"id": amb.estado.novo_id("SLK"), "tipo": tipo, "area": area, "urgencia": urgencia,
-            "data_hora": amb.estado.agora_txt(), "autor": amb.ator, "texto_slack": texto}
+            "data_hora": amb.estado.agora_txt(), "autor": amb.ator, "texto_slack": texto,
+            # campos separados para a interface montar cartões legíveis (D-029)
+            "titulo": mascarar_pii(titulo),
+            "campos": {k: mascarar_pii(str(v)) for k, v in linhas.items() if not _vazio(v)}}
     amb.estado.canal_do_time.append(item)
     return item
 

@@ -5,6 +5,20 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-029 · Linguagem simples para pessoas; interface minimalista azul e branca (pedido do usuário)
+- **Contexto:** o usuário achou o dossiê difícil de entender (exemplo: AT116568) e pediu para evitar termos técnicos, mantendo as fontes. Também não entendeu a aba "Canal do time" e pediu uma interface minimalista: fundo branco, azul e branco como cores principais e cor só para diferenciar o que é importante.
+- **Decisão (linguagem):** `src/linguagem.py` traduz nomes técnicos (ferramentas, categorias, situações, tipos de pendência, áreas) para português comum. `humanizar()` troca esses nomes dentro de qualquer frase.
+  - O dossiê agora tem duas partes:
+    - `dossie_simples`: em poucas palavras, o que o cliente escreveu, o que o agente fez, por quê, o que espera de uma pessoa e a resposta;
+    - `dossie_tecnico`: o conteúdo anterior, para auditoria.
+  - As fontes ficam no resumo, em letra pequena: a regra de `politicas.csv`, "sistemas de pedidos", os números de registro (`AC-…`, `PEN-…`).
+  - Os ajustes pedidos pelo revisor aparecem como os "problemas apontados" dele, em português, em vez das notas.
+- **Decisão (canal do time):** cada mensagem guarda também `titulo` e `campos`. A aba explica o que é o canal e mostra cartões com área, urgência por cor e "O que esperamos" em destaque, com filtros por área e urgência.
+- **Decisão (visual):** tema claro em `.streamlit/config.toml` (branco, azul `#1D4ED8`, azul-claro `#F3F6FB`), rótulos sem emojis e em linguagem comum ("Para decidir", "Problemas recorrentes").
+  - **Cores com significado:** azul = informação, verde = resolvido, âmbar = esperando alguém ou prazo curto, vermelho = urgente ou vencido.
+  - Fila em tabela simples com selos de situação; detalhes técnicos em painel recolhido.
+- **Limite:** a aparência não foi conferida num navegador por quem implementou; só o funcionamento (`tests/test_app.py`).
+
 ## D-028 · Interface da demo em Streamlit (no lugar da API)
 - **Contexto:** o item 9 previa uma API FastAPI "para demo". Na demo, quem avalia precisa **ver** o agente trabalhar e uma pessoa precisa **agir** como supervisor, para fechar o ciclo da D-027. Nada no projeto pede integração com outro sistema.
 - **Decisão:** `app.py` em Streamlit (`streamlit run app.py`), com seis abas:

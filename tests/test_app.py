@@ -18,13 +18,14 @@ def test_interface_ponta_a_ponta_sem_ia(tmp_path, monkeypatch):
     at.sidebar.toggle[0].set_value(False).run()  # sem IA: nada é classificado, tudo vai para o supervisor
     at.sidebar.button[0].click().run()
     assert not at.exception and at.success
-    assert [t.label.split(" ")[1] for t in at.tabs][:2] == ["Fila", "Supervisor"]
+    rotulos = [t.label for t in at.tabs]
+    assert rotulos[0] == "Fila" and rotulos[1].startswith("Para decidir")
 
-    liberar = [b for b in at.button if b.label.startswith("📤 Liberar")]
+    liberar = [b for b in at.button if b.label == "Liberar e publicar"]
     liberar[0].click().run()
     assert at.error and "rascunho" in at.error[0].value          # sem texto, pede o texto
     at.text_area[0].set_value("Olá! Recebemos sua mensagem e já estamos cuidando do seu caso.").run()
-    [b for b in at.button if b.label.startswith("📤 Liberar")][0].click().run()
+    [b for b in at.button if b.label == "Liberar e publicar"][0].click().run()
     assert "Publicado" in at.success[0].value
 
     [b for b in at.button if b.label == "+1 dia"][0].click().run()
