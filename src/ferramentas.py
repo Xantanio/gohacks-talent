@@ -209,7 +209,7 @@ class Ambiente:
             return {"ok": False, "erro": f"parâmetros obrigatórios ausentes em {nome}: {faltando}"}
         if nome not in FERRAMENTAS_LEITURA and (not trilha or _vazio(trilha.get("por_que"))):
             return {"ok": False, "erro": f"{nome} altera estado: informe trilha={{'por_que': ...}} (auditoria)"}
-        impl = _IMPLEMENTACOES.get(nome)
+        impl = _implementacoes().get(nome)
         if impl is None:
             return {"ok": False, "erro": f"ferramenta {nome} ainda não simulada"}
         if nome in FERRAMENTAS_LEITURA:
@@ -492,7 +492,17 @@ _IMPLEMENTACOES: dict[str, Callable[..., dict[str, Any]]] = {
     "validar_cupom": _validar_cupom,
 }
 
-# Ferramentas de ação (registradas no fim para evitar import circular: acoes.py usa os helpers acima).
-from .acoes import IMPLEMENTACOES as _IMPL_ACOES  # noqa: E402
+_CARREGADAS = False
 
-_IMPLEMENTACOES.update(_IMPL_ACOES)
+
+def _implementacoes() -> dict[str, Callable[..., dict[str, Any]]]:
+    """Registra as ferramentas de ação na 1ª chamada (não no import): acoes.py e acoes_analista.py importam este
+    módulo, então registrar no import criava ciclo quando eles eram importados primeiro."""
+    global _CARREGADAS
+    if not _CARREGADAS:
+        from .acoes import IMPLEMENTACOES as acoes
+        from .acoes_analista import IMPLEMENTACOES as analista
+        _IMPLEMENTACOES.update(acoes)
+        _IMPLEMENTACOES.update(analista)
+        _CARREGADAS = True
+    return _IMPLEMENTACOES

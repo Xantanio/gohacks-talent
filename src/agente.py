@@ -167,6 +167,7 @@ class Resultado:
     tentativas: list[str] = field(default_factory=list)   # motivos das redações reprovadas antes da final
     confianca_baixa: str | None = None                    # análise do D-020 quando o Jev ficou em dúvida
     julgamento: llm.Julgamento | None = None              # último parecer do juiz (D-022)
+    padroes: list[str] = field(default_factory=list)      # o que o analista fez quando o atendente o chamou (D-026)
     erro: str | None = None
 
 
@@ -244,8 +245,26 @@ def _motivos_para_reter(t: Ticket, d: Decisao | None, confianca_liberada: bool =
     return m
 
 
+def _chamar_analista(amb: Ambiente, r: Resultado) -> None:
+    """O atendente percebeu um caso repetível: passa ao analista, que confirma o padrão e trata o incidente (D-026).
+
+    Orquestração interna entre os dois agentes (o catálogo não tem ferramenta de passagem); fica no dossiê.
+    """
+    from . import analista
+    t, c = r.ticket, r.ticket.classificacao
+    for tr in analista.chamado_pelo_atendente(amb, t.conversation_id, t.order_id, c.categoria if c else ""):
+        inc = tr.candidato
+        r.padroes.append(
+            f"{tr.incidente_id} — {inc.titulo} ({inc.escopo})"
+            + (": incidente já aberto" if tr.ja_existia else
+               f": incidente aberto agora; {tr.notificados} clientes avisados antes de reclamar"
+               + (f", {tr.chamados_abertos} chamados abertos" if tr.chamados_abertos else "")
+               + (f", {len(tr.fora_do_prazo)} fora do prazo para decisão humana" if tr.fora_do_prazo else "")))
+
+
 def processar(amb: Ambiente, t: Ticket, redigir: Callable[[list[dict[str, str]]], llm.Redacao] | None,
-              julgar: Callable[[list[dict[str, str]]], llm.Julgamento] | None = None) -> Resultado:
+              julgar: Callable[[list[dict[str, str]]], llm.Julgamento] | None = None,
+              com_analista: bool = False) -> Resultado:
     r = Resultado(t)
     c = t.classificacao
     with amb.atendendo(t.conversation_id):
@@ -296,6 +315,8 @@ def processar(amb: Ambiente, t: Ticket, redigir: Callable[[list[dict[str, str]]]
                 mensagem_enviada = True
                 r.resposta, r.resposta_origem, r.publicada = res.get("texto"), "ferramenta", True
 
+        if com_analista:
+            _chamar_analista(amb, r)
         if mensagem_enviada and not passos_texto_livre:
             return r
         _responder_com_llm(amb, r, d, redigir, reter, trilha, passos_texto_livre, julgar)
@@ -510,6 +531,8 @@ def dossie(r: Resultado, amb: Ambiente) -> str:
         L += ["", f"> {filtro(r.resposta)}"]
     else:
         L.append("- nenhuma")
+    if r.padroes:
+        L += ["", "## 9. Padrão percebido → analista", ""] + [f"- {p}" for p in r.padroes]
     return "\n".join(L) + "\n"
 
 
@@ -520,8 +543,11 @@ def dossie(r: Resultado, amb: Ambiente) -> str:
 def rodar(canais: list[str] | None = None, limite: int | None = None, usar_ia: bool = True,
           pasta_saida: str | Path = "saida", amb: Ambiente | None = None,
           classificar: Callable | None = None, redigir: Callable | None = None,
-          julgar: Callable | None = None) -> tuple[list[Resultado], Path]:
-    """Processa a fila dos `canais` (padrão: só Reclame Aqui, escopo do MVP). Retorna resultados e a pasta de saída."""
+          julgar: Callable | None = None, com_analista: bool = True) -> tuple[list[Resultado], Path]:
+    """Processa a fila dos `canais` (padrão: só Reclame Aqui, escopo do MVP). Retorna resultados e a pasta de saída.
+
+    Com o analista: o atendente o chama ao perceber um padrão e, no fim, ele varre por conta própria (D-026).
+    """
     canais = canais or ["reclame_aqui"]
     amb = amb or Ambiente()
     if usar_ia:
@@ -537,26 +563,38 @@ def rodar(canais: list[str] | None = None, limite: int | None = None, usar_ia: b
     resultados = []
     for t in tickets:
         try:
-            resultados.append(processar(amb, t, redigir, julgar))
+            resultados.append(processar(amb, t, redigir, julgar, com_analista=com_analista))
         except Exception as e:  # falha segura: um ticket com erro não derruba a fila nem gera ação de dinheiro
             res = Resultado(t, erro=f"{type(e).__name__}: {e}"[:300], motivos_retencao=["erro interno"])
             with amb.atendendo(t.conversation_id):
                 _levantar_mao(amb, res, None)
             resultados.append(res)
+    relatorio = None
+    if com_analista:  # por conta própria: o que nenhum ticket acionou
+        from . import analista
+        relatorio = analista.varrer(amb)
     pasta = Path(pasta_saida) / datetime.now().strftime("%Y%m%d-%H%M%S")
     (pasta / "dossies").mkdir(parents=True, exist_ok=True)
     for r in resultados:
         (pasta / "dossies" / f"{r.ticket.conversation_id}.md").write_text(dossie(r, amb), encoding="utf-8")
     amb.estado.exportar(pasta)
-    (pasta / "resumo.md").write_text(resumo(resultados, canais), encoding="utf-8")
+    if relatorio is not None:
+        from . import analista
+        (pasta / "analista.md").write_text(analista.resumo(relatorio), encoding="utf-8")
+    (pasta / "resumo.md").write_text(resumo(resultados, canais, amb), encoding="utf-8")
     return resultados, pasta
 
 
-def resumo(resultados: list[Resultado], canais: list[str]) -> str:
+def resumo(resultados: list[Resultado], canais: list[str], amb: Ambiente | None = None) -> str:
     L = [f"# Execução do agente — {', '.join(canais)}", "",
          f"{len(resultados)} tickets · {sum(r.publicada for r in resultados)} respondidos · "
-         f"{sum(bool(r.motivos_retencao) for r in resultados)} retidos para revisão humana", "",
-         f"Custo de IA: {llm.CUSTOS.resumo()}", "",
+         f"{sum(bool(r.motivos_retencao) for r in resultados)} retidos para revisão humana", ""]
+    if amb is not None and amb.estado.incidentes:
+        L += [f"Analista: {len(amb.estado.incidentes)} incidentes · {len(amb.estado.notificacoes)} clientes avisados "
+              f"antes de reclamar · detalhes em [analista.md](analista.md)", ""]
+        L += [f"- {r.ticket.conversation_id} percebeu o padrão → {p}" for r in resultados for p in r.padroes]
+        L.append("")
+    L += [f"Custo de IA: {llm.CUSTOS.resumo()}", "",
          "| # | Conversa | Prioridade | SLA (h) | Categoria | Caminho | Ações | Resposta |", "|---|---|---|---|---|---|---|---|"]
     for i, r in enumerate(resultados, 1):
         t = r.ticket
@@ -574,8 +612,9 @@ def main() -> None:
     ap.add_argument("--limite", type=int, default=None)
     ap.add_argument("--sem-ia", action="store_true", help="não chama o proxy; tudo vai para revisão humana")
     ap.add_argument("--saida", default="saida")
+    ap.add_argument("--sem-analista", action="store_true", help="não aciona o agente analista (incidentes e avisos)")
     a = ap.parse_args()
-    resultados, pasta = rodar(a.canais, a.limite, not a.sem_ia, a.saida)
+    resultados, pasta = rodar(a.canais, a.limite, not a.sem_ia, a.saida, com_analista=not a.sem_analista)
     print(f"\n{len(resultados)} tickets · {sum(r.publicada for r in resultados)} respondidos · "
           f"{sum(bool(r.motivos_retencao) for r in resultados)} retidos · saída em {pasta}")
     print(f"Custo de IA: {llm.CUSTOS.resumo()}")

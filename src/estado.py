@@ -39,6 +39,8 @@ SISTEMA_POR_ACAO = {
     "rejeitar_acao": "Fila do supervisor",
     "sinalizar_suspeita": "Fila do supervisor",
     "decidir_suspeita": "Fila do supervisor",
+    "abrir_incidente": "Gestão de incidentes",
+    "notificar_clientes": "Plataforma de comunicação",
 }
 SISTEMA_PADRAO = "Central de atendimento"
 
@@ -59,6 +61,8 @@ class Estado:
     cosmetovigilancia: list[dict[str, Any]] = field(default_factory=list)
     canal_do_time: list[dict[str, Any]] = field(default_factory=list)  # mãos levantadas e respostas a colaboradores
     validacoes: list[dict[str, Any]] = field(default_factory=list)     # cada tentativa de texto: validador + juiz (D-022)
+    incidentes: list[dict[str, Any]] = field(default_factory=list)     # abertos pelo analista (D-026)
+    notificacoes: list[dict[str, Any]] = field(default_factory=list)   # avisos proativos, um por pedido (D-026)
     _seq: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
@@ -127,6 +131,8 @@ class Estado:
             "chamados": _csv(pasta / "chamados_transportadora.csv", self.chamados),
             "cosmetovigilancia": _csv(pasta / "cosmetovigilancia.csv", self.cosmetovigilancia),
             "validacoes": _csv(pasta / "validacoes.csv", self.validacoes),
+            "incidentes": _csv(pasta / "incidentes.csv", self.incidentes),
+            "notificacoes": _csv(pasta / "notificacoes.csv", self.notificacoes),
         }
         caminho_log = pasta / "log_chamadas.jsonl"
         with caminho_log.open("w", encoding="utf-8") as f:

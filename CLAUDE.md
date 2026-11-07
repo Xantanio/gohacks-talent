@@ -160,10 +160,10 @@ A implementar junto com `llm.py` / `agente.py`:
 | 5 | `llm.py`: Jev (classificação) + `glm-5.3` (resposta), custo e 429, **validador de saída e falha segura** | ✅ (`tests/test_llm.py`; ao vivo com `RODAR_IA=1`; D-018) |
 | 6 | `agente.py`: filtro `canais=["reclame_aqui"]`, priorização da fila, loop por ticket, **dossiê por ticket**, aprovação humana antes de publicar nos casos da seção Guardrails | ✅ (`python -m src.agente`; `tests/test_agente.py`; D-019) |
 | 7 | Trilha de decisão completa: trilha em toda ação ✅; justificativa de LLM/Jev, dossiê e `docs/DECISOES.md` sempre atualizado | 🔄 contínuo |
-| 8 | Frente analista: `buscar_conversas`, `consultar_metricas`, `abrir_incidente`, `notificar_clientes` (ainda não simuladas) | ⬜ |
+| 8 | **Agente analista**: 4 ferramentas simuladas, detecção de incidentes (impressora, transportadora+UF, brinde por CD, lote por item, gateway), aviso proativo (consentimento, 300/dia, prazo de 7 dias), passagem atendente → analista | ✅ (`python -m src.analista`; `tests/test_analista.py`; D-025, D-026) |
 | 9 | `api.py` para demo (substitui o protótipo `tests/main.py`, que inventa ação de cupom) | ⬜ |
 
-Visão 360° (desenhar; implementar só detecção se der tempo): frente "analista" que acha contatos repetidos com causa comum (máquina, lote, transportadora+UF, cobrança em dobro) → `abrir_incidente` + `notificar_clientes` antes do cliente escrever.
+Visão 360° (**implementada**, D-026): agente **analista** que acha contatos repetidos com causa comum (impressora, transportadora+UF, brinde por CD, lote por item, cobrança em dobro) → `abrir_incidente` + `notificar_clientes` antes do cliente escrever. Trabalha chamado pelo atendente (quando o ticket pertence a um padrão) e por conta própria (varredura no fim da execução).
 
 Canal do time: notificações de "levantar a mão" num formato pronto para Slack (pode começar como saída no terminal / arquivo).
 
@@ -179,7 +179,9 @@ src/
   veracidade.py    # sinais de fraude → p_verdadeira (+ detecção de grupo entre clientes novos)
   decisao.py       # custo esperado (LTV real ou potencial p/ novos), teto e limite de 1 auto p/ novos
   llm.py           # cliente do AI Proxy (Jev + chat) com registro de custo
-  agente.py        # loop: prioriza fila e processa ticket a ticket
+  agente.py        # atendente: prioriza a fila e processa ticket a ticket; chama o analista ao perceber padrão
+  analista.py      # analista: detecta incidentes (taxa + janela), abre incidente, avisa quem ainda não reclamou
+  acoes_analista.py # ferramentas do analista (buscar_conversas, consultar_metricas, abrir_incidente, notificar_clientes)
   api.py           # FastAPI (opcional, para demo)
 tests/
 ```

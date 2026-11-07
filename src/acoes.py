@@ -712,5 +712,4 @@ IMPLEMENTACOES: dict[str, Callable[..., Resultado]] = {
     "acionar_pessoa": _acionar_pessoa,
     "responder_colaborador": _responder_colaborador,
 }
-# Ainda não simuladas (frente "analista", item 8 da agenda): buscar_conversas, consultar_metricas,
-# abrir_incidente, notificar_clientes.
+# Ferramentas do analista (buscar_conversas, consultar_metricas, abrir_incidente, notificar_clientes): acoes_analista.py

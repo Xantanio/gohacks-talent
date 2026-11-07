@@ -5,6 +5,33 @@ Decisões tomadas *em cada ticket* não ficam aqui: ficam na trilha de cada aç�
 
 ---
 
+## D-026 · Agente analista: detecção com taxa e janela, aviso proativo com travas, passagem do atendente
+- **Ferramentas simuladas** (`acoes_analista.py`):
+  - `buscar_conversas`: até 500 resultados; filtro de lote **por item**.
+  - `consultar_metricas`: por dia, categoria, canal, marca, transportadora, UF, SKU, lote, impressora e CD.
+  - `abrir_incidente`: tipos do catálogo; não duplica; posta no canal do time para a área responsável.
+  - `notificar_clientes`: **300 por dia**, **consentimento** (`aceita_comunicacao_*`), nunca o mesmo aviso duas vezes, texto mascarado.
+  - O registro das implementações passou a ser feito na primeira chamada, porque importar `acoes` antes de `ferramentas` criava um ciclo de import.
+- **Detecção** (`analista.py`), mesma régua para impressora e brinde por CD:
+  - Taxa semanal de reclamação **só entre pedidos entregues** (quem não recebeu não teve como reclamar).
+  - **Confirma** o incidente com uma semana ≥ 3× a taxa das demais origens no período todo (piso de 5%). Depois **estende** a janela pelas semanas vizinhas com ≥ 2× e pelo menos 2 reclamações.
+  - A janela vai da primeira à última separação de pedido reclamado.
+  - Transportadora: UFs com pelo menos 5 atrasados e taxa ≥ 50%. Lote: só defeito de produto citado pelo cliente. Gateway: últimos 7 dias contra a média semanal.
+- **Calibração pela execução real** (o que deu errado antes de dar certo):
+  1. A expressão regular de personalização casava "nome" e "impress" em qualquer conversa e o denominador incluía pedidos em trânsito: **a PRN-02 não era detectada**.
+  2. Atribuir o lote pelo produto citado com 3 palavras gerou 3 falsos incidentes de lote. Passou a usar só o nome do produto e só vazamento, tampa ou rachadura ("amassado" é transporte).
+  3. A base da **mesma semana** escondia a primeira semana do CD2, porque o CD1 teve reclamações naquela semana. Passou a usar a base do período todo.
+  4. A base do período todo deixou a semana de 26/10 da PRN-02 (18% contra 6%) logo abaixo de 3×. Por isso o critério virou "confirmar com 3×, estender com 2×".
+  5. Na varredura final, um incidente já tratado pelo atendente repetia a escalação de "fora do prazo". Agora incidente existente não repete escalação nem chamados.
+- **Regra da política no aviso:** reposição só até 7 dias do recebimento. O aviso que promete nova produção ou envio do brinde vai só para quem está no prazo ou ainda não recebeu. Os demais vão para decisão humana (a falha foi da empresa).
+- **Passagem do atendente para o analista:** orquestração interna. Em categoria repetível, o atendente pergunta se o pedido está num padrão, e o analista (outra cadeira, mesmo estado) trata o incidente. Fica no dossiê (seção 9), no resumo e na trilha (`origem: regra (analista, chamado pelo atendente em ATxxxx)`). A varredura final pega o que nenhum ticket acionou.
+- **Execução real (Reclame Aqui, 24 tickets):** 23 respondidos e 1 retido; 4 incidentes; **126 clientes avisados antes de reclamar**.
+  - Expressa Já no Nordeste: 64 avisados e 72 chamados, a partir do AT116160.
+  - Brinde do CD2: 27 avisados e 12 fora do prazo para decisão humana, a partir do AT116501.
+  - PRN-02: 35 avisados, 2 fora do prazo e 13 em monitoramento, na varredura.
+  - Gateway: pico real, mas os 5 clientes já tinham contatado.
+  - Sem falso incidente de lote.
+
 ## D-025 · Análise prévia ao agente analista (item 8): o que os dados sustentam
 - **Proposta avaliada (usuário):** dois agentes.
   - Atendente: resolve o ticket.

@@ -93,7 +93,7 @@ def test_mensagens_publicas_sem_pedido_nem_rastreio(execucao):
 
 
 def test_casos_chave(execucao):
-    _, res, _ = execucao
+    amb, res, _ = execucao
     feitas = lambda cid: [e["ferramenta"] for e in res[cid].executados if e["ok"]]  # noqa: E731
     assert "solicitar_foto" in feitas("AT116501")                  # brinde sem foto: pede foto
     assert "solicitar_foto" in feitas("AT116614")                  # brinde consta no pedido: devido (D-024)
@@ -101,7 +101,8 @@ def test_casos_chave(execucao):
     assert "solicitar_aprovacao" in feitas("AT116520")             # reembolso acima da alçada
     assert "reembolsar" not in feitas("AT116520")                  # ...e não executa antes da aprovação
     assert any("aprovacao_id" in p for p in res["AT116520"].pendentes)
-    assert "abrir_chamado_transportadora" in feitas("AT116507")    # atraso curto sem chamado
+    # atraso curto: o chamado do pedido é aberto UMA vez (aqui, pelo analista ao tratar o incidente da Expressa Já)
+    assert sum(ch["order_id"] == "GBH469698" for ch in amb.estado.chamados) == 1
     assert "reimprimir_personalizacao" not in feitas("AT116524")   # reposição já aberta (D-016)
     assert res["AT116524"].resposta_origem == "llm" and res["AT116524"].publicada
 
